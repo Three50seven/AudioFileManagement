@@ -4,7 +4,7 @@ string _archivePath = "";
 string _libraryPath = "";
 string _highQualityPath = "";
 string _processedPath = "";
-StreamWriter _logWriter = null;
+StreamWriter? _logWriter = null;
 
 Console.WriteLine("=== MP3 File Manager and Metadata Copier ===\n");
 Console.WriteLine("Manages metatags and updates the specified library with matching (hopefully) higher-quality files, if specified.\n\n");
