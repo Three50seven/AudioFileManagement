@@ -67,6 +67,371 @@ namespace MP3FileManager
             }
         }
 
+        private void CopyAlbumArt(TagLib.File source, TagLib.File dest)
+        {
+            try
+            {
+                var srcTag = source.Tag;
+                var destTag = dest.Tag;
+
+                Log($"    Source file tag types: {source.TagTypes}");
+                Log($"    Destination file tag types: {dest.TagTypes}");
+
+                // Clear any existing pictures first
+                destTag.Pictures = null;
+
+                if (srcTag.Pictures != null && srcTag.Pictures.Length > 0)
+                {
+                    Log($"    Found {srcTag.Pictures.Length} pictures in source Tag.Pictures");
+
+                    // iTunes-specific album art embedding
+                    var success = EmbedAlbumArtForItunes(source, dest);
+
+                    if (!success)
+                    {
+                        // Fallback to standard method
+                        Log("    iTunes-specific method failed, trying standard approach...");
+                        destTag.Pictures = ClonePictureArray(srcTag.Pictures);
+                    }
+
+                    return;
+                }
+
+                Log("    No album art found in source file");
+            }
+            catch (Exception ex)
+            {
+                Log($"    Error copying album art: {ex.Message}");
+                Log($"    Stack trace: {ex.StackTrace}");
+            }
+        }
+
+        private bool EmbedAlbumArtForItunes(TagLib.File source, TagLib.File dest)
+        {
+            try
+            {
+                // Ensure destination has ID3v2.3 tag (iTunes preferred format)
+                var id3v2Dest = dest.GetTag(TagLib.TagTypes.Id3v2, true) as TagLib.Id3v2.Tag;
+                if (id3v2Dest == null)
+                {
+                    Log("    Could not create ID3v2 tag on destination");
+                    return false;
+                }
+
+                // Set ID3v2 version to 2.3 (iTunes compatibility)
+                id3v2Dest.Version = 3;
+
+                // Remove any existing APIC frames
+                id3v2Dest.RemoveFrames("APIC");
+
+                // Find the best album art from source
+                TagLib.IPicture? bestPicture = null;
+
+                // First, try to get from source pictures
+                if (source.Tag.Pictures != null && source.Tag.Pictures.Length > 0)
+                {
+                    // Prefer FrontCover, then Other, then any type
+                    bestPicture = source.Tag.Pictures.FirstOrDefault(p => p.Type == TagLib.PictureType.FrontCover)
+                               ?? source.Tag.Pictures.FirstOrDefault(p => p.Type == TagLib.PictureType.Other)
+                               ?? source.Tag.Pictures.FirstOrDefault();
+                }
+
+                if (bestPicture == null)
+                {
+                    Log("    No suitable picture found in source");
+                    return false;
+                }
+
+                Log($"    Using picture: Type={bestPicture.Type}, MimeType={bestPicture.MimeType}, Size={bestPicture.Data.Count} bytes");
+
+                // Create iTunes-compatible APIC frame
+                var apicFrame = new TagLib.Id3v2.AttachmentFrame
+                {
+                    Type = TagLib.PictureType.FrontCover, // iTunes expects FrontCover
+                    MimeType = NormalizeMimeType(bestPicture.MimeType),
+                    Description = "Cover", // iTunes-friendly description
+                    Data = bestPicture.Data
+                };
+
+                // Validate image data before adding
+                if (!IsValidImageData(bestPicture.Data.Data, apicFrame.MimeType))
+                {
+                    Log($"    Warning: Image data appears invalid for MIME type {apicFrame.MimeType}");
+                }
+
+                id3v2Dest.AddFrame(apicFrame);
+                Log($"    Added APIC frame: {apicFrame.Type}, {apicFrame.MimeType}, {apicFrame.Data.Count} bytes");
+
+                // Also update the main tag pictures (important for compatibility)
+                var itunesPicture = new TagLib.Picture(bestPicture.Data.Data)
+                {
+                    Type = TagLib.PictureType.FrontCover,
+                    MimeType = apicFrame.MimeType,
+                    Description = "Cover"
+                };
+
+                dest.Tag.Pictures = new TagLib.IPicture[] { itunesPicture };
+                Log($"    Updated main tag with iTunes-compatible picture");
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log($"    Error in iTunes-specific embedding: {ex.Message}");
+                return false;
+            }
+        }
+
+        private string NormalizeMimeType(string originalMimeType)
+        {
+            if (string.IsNullOrEmpty(originalMimeType))
+                return "image/jpeg"; // Default fallback
+
+            var normalized = originalMimeType.ToLower().Trim();
+
+            // Normalize common variations
+            switch (normalized)
+            {
+                case "image/jpg":
+                case "image/jpeg":
+                case "jpeg":
+                case "jpg":
+                    return "image/jpeg";
+
+                case "image/png":
+                case "png":
+                    return "image/png";
+
+                case "image/gif":
+                case "gif":
+                    return "image/gif";
+
+                case "image/bmp":
+                case "bmp":
+                    return "image/bmp";
+
+                default:
+                    // If it starts with image/, keep as is, otherwise assume jpeg
+                    return normalized.StartsWith("image/") ? normalized : "image/jpeg";
+            }
+        }
+
+        private TagLib.IPicture[] ClonePictureArray(TagLib.IPicture[] originalPictures)
+        {
+            var clonedPictures = new TagLib.IPicture[originalPictures.Length];
+            for (int i = 0; i < originalPictures.Length; i++)
+            {
+                var original = originalPictures[i];
+                clonedPictures[i] = new TagLib.Picture(original.Data.Data)
+                {
+                    Type = original.Type == TagLib.PictureType.Other ? TagLib.PictureType.FrontCover : original.Type,
+                    MimeType = NormalizeMimeType(original.MimeType),
+                    Description = string.IsNullOrEmpty(original.Description) ? "Cover" : original.Description
+                };
+            }
+            return clonedPictures;
+        }
+
+        private bool IsValidImageData(byte[] imageData, string mimeType)
+        {
+            if (imageData == null || imageData.Length < 4)
+                return false;
+
+            // Check common image file signatures
+            if (mimeType?.ToLower().Contains("jpeg") == true)
+            {
+                return imageData[0] == 0xFF && imageData[1] == 0xD8; // JPEG signature
+            }
+            else if (mimeType?.ToLower().Contains("png") == true)
+            {
+                return imageData[0] == 0x89 && imageData[1] == 0x50 && imageData[2] == 0x4E && imageData[3] == 0x47; // PNG signature
+            }
+            else if (mimeType?.ToLower().Contains("gif") == true)
+            {
+                return (imageData[0] == 0x47 && imageData[1] == 0x49 && imageData[2] == 0x46); // GIF signature
+            }
+            else if (mimeType?.ToLower().Contains("bmp") == true)
+            {
+                return imageData[0] == 0x42 && imageData[1] == 0x4D; // BMP signature
+            }
+
+            // For unknown MIME types, just check if we have some data
+            return imageData.Length > 100; // Assume valid if we have substantial data
+        }
+
+        private void VerifyAlbumArt(string filePath, string context)
+        {
+            try
+            {
+                using var file = TagLib.File.Create(filePath);
+                var pictureCount = file.Tag.Pictures?.Length ?? 0;
+                Log($"  {context}: {pictureCount} embedded images");
+
+                if (pictureCount > 0)
+                {
+                    TagLib.IPicture[]? pictures = file.Tag.Pictures;
+                    if (pictures?.Length > 0)
+                    {
+                        for (int i = 0; i < pictures.Length; i++)
+                        {
+                            var picture = pictures[i];
+                            Log($"    Image {i + 1}: {picture.Type}, {picture.MimeType}, {picture.Data.Count} bytes");
+
+                            // Additional validation - try to read the image data
+                            if (picture.Data.Count > 0)
+                            {
+                                var imageData = picture.Data.Data;
+                                if (IsValidImageData(imageData, picture.MimeType))
+                                {
+                                    Log($"      ✓ Image data appears valid ({GetImageDimensions(imageData, picture.MimeType)})");
+                                }
+                                else
+                                {
+                                    Log($"      ⚠ Image data may be corrupted or invalid signature");
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Check ID3v2 specific frames for debugging
+                if (file.TagTypes.HasFlag(TagLib.TagTypes.Id3v2))
+                {
+                    var id3v2 = file.GetTag(TagLib.TagTypes.Id3v2) as TagLib.Id3v2.Tag;
+                    if (id3v2 != null)
+                    {
+                        Log($"    ID3v2 version: {id3v2.Version}");
+                        var apicFrames = id3v2.GetFrames<TagLib.Id3v2.AttachmentFrame>();
+                        if (apicFrames != null)
+                        {
+                            Log($"    ID3v2 APIC frames: {apicFrames.Count()}");
+                            foreach (var frame in apicFrames)
+                            {
+                                Log($"      APIC: {frame.Type}, {frame.MimeType}, {frame.Description}, {frame.Data.Count} bytes");
+
+                                // Check if this looks like iTunes-compatible format
+                                var isItunesCompatible = frame.Type == TagLib.PictureType.FrontCover &&
+                                                       !string.IsNullOrEmpty(frame.MimeType) &&
+                                                       frame.MimeType.StartsWith("image/");
+
+                                Log($"      iTunes compatible: {(isItunesCompatible ? "✓" : "✗")}");
+                            }
+                        }
+                    }
+                }
+
+                // Test iTunes compatibility
+                TestItunesCompatibility(filePath);
+            }
+            catch (Exception ex)
+            {
+                Log($"  Error verifying album art in {context}: {ex.Message}");
+            }
+        }
+
+        private string GetImageDimensions(byte[] imageData, string mimeType)
+        {
+            try
+            {
+                if (mimeType?.ToLower().Contains("jpeg") == true && imageData.Length > 10)
+                {
+                    // Basic JPEG dimension extraction (simplified)
+                    for (int i = 2; i < imageData.Length - 10; i++)
+                    {
+                        if (imageData[i] == 0xFF && (imageData[i + 1] == 0xC0 || imageData[i + 1] == 0xC2))
+                        {
+                            var height = (imageData[i + 5] << 8) | imageData[i + 6];
+                            var width = (imageData[i + 7] << 8) | imageData[i + 8];
+                            return $"{width}x{height}";
+                        }
+                    }
+                }
+                else if (mimeType?.ToLower().Contains("png") == true && imageData.Length > 24)
+                {
+                    // PNG dimension extraction
+                    var width = (imageData[16] << 24) | (imageData[17] << 16) | (imageData[18] << 8) | imageData[19];
+                    var height = (imageData[20] << 24) | (imageData[21] << 16) | (imageData[22] << 8) | imageData[23];
+                    return $"{width}x{height}";
+                }
+
+                return "dimensions unknown";
+            }
+            catch
+            {
+                return "dimensions unknown";
+            }
+        }
+
+        private void TestItunesCompatibility(string filePath)
+        {
+            try
+            {
+                using var file = TagLib.File.Create(filePath);
+
+                var issues = new List<string>();
+
+                // Check ID3v2 version
+                if (file.TagTypes.HasFlag(TagLib.TagTypes.Id3v2))
+                {
+                    var id3v2 = file.GetTag(TagLib.TagTypes.Id3v2) as TagLib.Id3v2.Tag;
+                    if (id3v2 != null)
+                    {
+                        if (id3v2.Version != 3 && id3v2.Version != 4)
+                        {
+                            issues.Add($"ID3v2 version {id3v2.Version} (iTunes prefers v2.3 or v2.4)");
+                        }
+
+                        var apicFrames = id3v2.GetFrames<TagLib.Id3v2.AttachmentFrame>();
+                        if (!apicFrames.Any())
+                        {
+                            issues.Add("No APIC frames found");
+                        }
+                        else
+                        {
+                            foreach (var frame in apicFrames)
+                            {
+                                if (frame.Type != TagLib.PictureType.FrontCover)
+                                {
+                                    issues.Add($"Picture type is {frame.Type} (iTunes prefers FrontCover)");
+                                }
+
+                                if (string.IsNullOrEmpty(frame.MimeType) || !frame.MimeType.StartsWith("image/"))
+                                {
+                                    issues.Add($"Invalid MIME type: '{frame.MimeType}'");
+                                }
+
+                                if (frame.Data.Count == 0)
+                                {
+                                    issues.Add("Empty image data");
+                                }
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    issues.Add("No ID3v2 tag found");
+                }
+
+                if (issues.Count == 0)
+                {
+                    Log($"    ✓ iTunes compatibility: No issues detected");
+                }
+                else
+                {
+                    Log($"    ⚠ iTunes compatibility issues:");
+                    foreach (var issue in issues)
+                    {
+                        Log($"      - {issue}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"    Error testing iTunes compatibility: {ex.Message}");
+            }
+        }
+
         public async Task RunAsync()
         {
             Console.WriteLine("=== MP3 File Manager and Metadata Copier ===\n");
@@ -134,9 +499,9 @@ namespace MP3FileManager
         {
             try
             {
-                using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
-                var principal = new System.Security.Principal.WindowsPrincipal(identity);
-                return principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+                using System.Security.Principal.WindowsIdentity identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+                System.Security.Principal.WindowsPrincipal principal = new System.Security.Principal.WindowsPrincipal(identity);
+                return principal.IsInRole(role: System.Security.Principal.WindowsBuiltInRole.Administrator);
             }
             catch
             {
@@ -155,8 +520,8 @@ namespace MP3FileManager
                 }
 
                 var testFile = Path.Combine(path, $"write_test_{Guid.NewGuid():N}.tmp");
-                File.WriteAllText(testFile, "test");
-                File.Delete(testFile);
+                System.IO.File.WriteAllText(testFile, "test");
+                System.IO.File.Delete(testFile);
                 Console.WriteLine($"{location}: Write access OK - {path}");
             }
             catch (Exception ex)
@@ -227,7 +592,6 @@ namespace MP3FileManager
                 Console.WriteLine("Error: Archive path is required when replacing files in library.");
                 return false;
             }
-
             return true;
         }
 
@@ -261,8 +625,8 @@ namespace MP3FileManager
                 var testFile = Path.Combine(Path.GetDirectoryName(_settings.LogPath) ?? "", "test_write.tmp");
                 try
                 {
-                    File.WriteAllText(testFile, "test");
-                    File.Delete(testFile);
+                    System.IO.File.WriteAllText(testFile, "test");
+                    System.IO.File.Delete(testFile);
                     Console.WriteLine($"Log directory write test successful: {Path.GetDirectoryName(_settings.LogPath)}");
                 }
                 catch (Exception ex)
@@ -364,6 +728,10 @@ namespace MP3FileManager
                 if (_settings.WhatIfMode)
                 {
                     Log($"[WHAT-IF] Would copy metadata from {Path.GetFileName(sourceFile.FullPath)} to {fileName}");
+
+                    // Verify source has album art in what-if mode
+                    VerifyAlbumArt(sourceFile.FullPath, "Source file");
+
                     processed++;
                     continue;
                 }
@@ -376,6 +744,8 @@ namespace MP3FileManager
                     {
                         var tag = dest.Tag;
                         var srcTag = source.Tag;
+
+                        Log($"  Source file has {srcTag.Pictures?.Length ?? 0} embedded images");
 
                         // Copy basic metadata
                         tag.Performers = srcTag.Performers;
@@ -393,20 +763,42 @@ namespace MP3FileManager
                         tag.Conductor = srcTag.Conductor;
                         tag.BeatsPerMinute = srcTag.BeatsPerMinute;
 
-                        // Copy ID3v2 specific tags and album art
+                        // Enhanced album art copying - handle multiple tag formats
+                        CopyAlbumArt(source, dest);
+
+                        // Copy additional ID3v2 specific tags
                         if (srcTag is TagLib.Id3v2.Tag id3v2src && tag is TagLib.Id3v2.Tag id3v2dest)
                         {
                             id3v2dest.Publisher = id3v2src.Publisher;
                             id3v2dest.Lyrics = id3v2src.Lyrics;
-                            // Copy album art
-                            id3v2dest.Pictures = id3v2src.Pictures;
+
+                            // Copy custom frames that might contain additional metadata
+                            foreach (var frame in id3v2src.GetFrames())
+                            {
+                                if (frame.FrameId.StartsWith("TXXX") || frame.FrameId.StartsWith("COMM"))
+                                {
+                                    try
+                                    {
+                                        id3v2dest.AddFrame(frame);
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        Log($"    Warning: Could not copy frame {frame.FrameId}: {ex.Message}");
+                                    }
+                                }
+                            }
                         }
 
+                        Log($"  Destination file now has {tag.Pictures?.Length ?? 0} embedded images");
                         dest.Save();
                     }
 
                     // Copy the updated file to processed directory
-                    File.Copy(hqFile, destFile, true);
+                    System.IO.File.Copy(hqFile, destFile, true);
+
+                    // Verify the album art was copied successfully
+                    VerifyAlbumArt(destFile, "Processed file");
+
                     Log($"Successfully processed: {fileName}");
                     processed++;
 
@@ -487,13 +879,15 @@ namespace MP3FileManager
                     if (!string.IsNullOrEmpty(_settings.ArchivePath))
                     {
                         var archiveFile = Path.Combine(_settings.ArchivePath, fileName);
-                        File.Copy(libraryFile, archiveFile, true);
+                        System.IO.File.Copy(libraryFile, archiveFile, true);
                         Log($"Archived original: {fileName}");
                     }
 
                     // Replace with processed file
-                    File.Copy(processedFile, libraryFile, true);
+                    System.IO.File.Copy(processedFile, libraryFile, true);
                     Log($"Replaced in library: {fileName}");
+
+                    await Task.CompletedTask;
                 }
                 catch (Exception ex)
                 {
@@ -724,7 +1118,7 @@ namespace MP3FileManager
             }
         }
     }
-
+ 
     class Program
     {
         static async Task Main(string[] args)
