@@ -29,9 +29,10 @@ csvartist,title,album,filename
 ```
 ## Usage Examples:
 Batch Processing with CSV:
-bash# Convert and tag entire collection
+```
+# Convert and tag entire collection
 AudioMetadataTagger.exe "C:\Music\Collection" -seeders-file "metadata.csv" -convert mp3 -quality 320
-
+```
 # FLAC conversion with custom output
 ```
 AudioMetadataTagger.exe "C:\Albums" -seeders-file "tracklist.csv" -convert flac -output "C:\Converted" -preserve-original

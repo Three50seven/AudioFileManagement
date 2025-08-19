@@ -24,13 +24,24 @@ namespace AudioFileMetadataProcessor
                 return;
             }
 
+            // Use InputPath from configuration if no arguments provided
+            string inputPath;
             if (args.Length == 0)
             {
-                ShowUsage();
-                return;
+                inputPath = GetConfigurationValue("AppSettings:InputPath", "");
+                if (string.IsNullOrEmpty(inputPath))
+                {
+                    ShowUsage();
+                    return;
+                }
+                Console.WriteLine($"Using InputPath from configuration: {inputPath}");
+            }
+            else
+            {
+                inputPath = args[0];
             }
 
-            var config = ParseArguments(args);
+            var config = ParseArguments(args, inputPath);
             if (config == null) return;
 
             // Check for required tools
@@ -100,7 +111,9 @@ namespace AudioFileMetadataProcessor
         static void ShowUsage()
         {
             Console.WriteLine("Usage:");
-            Console.WriteLine("  AudioMetadataTagger.exe <input_path> [options]");
+            Console.WriteLine("  AudioMetadataTagger.exe [input_path] [options]");
+            Console.WriteLine();
+            Console.WriteLine("Note: If no input_path is provided, the program will use AppSettings:InputPath from appsettings.json");
             Console.WriteLine();
             Console.WriteLine("Options:");
             Console.WriteLine("  -convert <format>     Convert to specified format (mp3, flac, wav, m4a, ogg)");
@@ -109,11 +122,19 @@ namespace AudioFileMetadataProcessor
             Console.WriteLine("                        FLAC: 0-8 compression level");
             Console.WriteLine("                        M4A: bitrate (128, 192, 256, 320)");
             Console.WriteLine("  -output <directory>   Output directory for converted files");
+            Console.WriteLine("                        (Uses AppSettings:OutputPath from config if not specified)");
             Console.WriteLine("  -preserve-original    Keep original files when converting");
             Console.WriteLine("  -artist <name>        Artist name for metadata search");
             Console.WriteLine("  -title <name>         Song title for metadata search");
             Console.WriteLine("  -album <name>         Album name for metadata search");
             Console.WriteLine("  -seeders-file <path>  CSV file with seeder data (artist,title,album,filename)");
+            Console.WriteLine("                        (Uses AppSettings:SeedersFileCSVFullPath from config if not specified)");
+            Console.WriteLine();
+            Console.WriteLine("AppSettings.json Configuration:");
+            Console.WriteLine("  \"AppSettings\": {");
+            Console.WriteLine("    \"SeedersFileCSVFullPath\": \"C:\\\\Data\\\\_Template.csv\",");
+            Console.WriteLine("    \"OutputPath\": \"C:\\\\Data\\\\mp3\"");
+            Console.WriteLine("  }");
             Console.WriteLine();
             Console.WriteLine("CSV Format:");
             Console.WriteLine("  artist,title,album,filename");
@@ -121,16 +142,26 @@ namespace AudioFileMetadataProcessor
             Console.WriteLine("  \"Queen\",\"Bohemian Rhapsody\",\"A Night at the Opera\",\"\"");
             Console.WriteLine();
             Console.WriteLine("Examples:");
+            Console.WriteLine("  AudioMetadataTagger.exe (uses config paths)");
             Console.WriteLine("  AudioMetadataTagger.exe \"song.wav\" -artist \"The Beatles\" -title \"Hey Jude\"");
-            Console.WriteLine("  AudioMetadataTagger.exe \"C:\\Music\" -seeders-file \"metadata.csv\" -convert mp3");
-            Console.WriteLine("  AudioMetadataTagger.exe \"album\" -seeders-file \"tracks.csv\" -convert flac -quality 5");
+            Console.WriteLine("  AudioMetadataTagger.exe \"C:\\Music\" -convert mp3");
+            Console.WriteLine("  AudioMetadataTagger.exe -convert flac -quality 5");
         }
 
-        static ProcessingConfig? ParseArguments(string[] args)
+        static ProcessingConfig? ParseArguments(string[] args, string inputPath)
         {
-            var config = new ProcessingConfig { InputPath = args[0] };
+            var config = new ProcessingConfig { InputPath = inputPath };
 
-            for (int i = 1; i < args.Length; i++)
+            // Set default output directory from configuration
+            config.OutputDirectory = GetConfigurationValue("AppSettings:OutputPath", "");
+
+            // Set default seeders file from configuration if not processing a specific file
+            if (Directory.Exists(inputPath) || string.IsNullOrEmpty(Path.GetExtension(inputPath)))
+            {
+                config.SeedersFile = GetConfigurationValue("AppSettings:SeedersFileCSVFullPath", "");
+            }
+
+            for (int i = (args.Length > 0 && !args[0].StartsWith("-") ? 1 : 0); i < args.Length; i++)
             {
                 switch (args[i].ToLower())
                 {
@@ -195,7 +226,7 @@ namespace AudioFileMetadataProcessor
             if (string.IsNullOrEmpty(config.SeederArtist) && string.IsNullOrEmpty(config.SeederTitle) &&
                 config.SeedersData == null)
             {
-                Console.WriteLine("Error: No seeder data provided. Use -artist/-title or -seeders-file");
+                Console.WriteLine("Error: No seeder data provided. Use -artist/-title or -seeders-file or configure AppSettings:SeedersFileCSVFullPath");
                 return null;
             }
 
@@ -294,6 +325,11 @@ namespace AudioFileMetadataProcessor
                     RedirectStandardOutput = true,
                     CreateNoWindow = true
                 });
+                if (process == null)
+                {
+                    Console.WriteLine("FFmpeg process could not be started. Check the FFmpeg path in appsettings.json.");
+                    return false;
+                }
                 process.WaitForExit();
                 return process.ExitCode == 0;
             }
@@ -371,15 +407,25 @@ namespace AudioFileMetadataProcessor
 
                 // Step 4: Search MusicBrainz using seeder data
                 Console.WriteLine($"Searching with: {seederData.Artist} - {seederData.Title}");
-                var searchResults = await SearchMusicBrainzBySeeder(seederData);
+                var searchResults = await SearchMusicBrainzBySeeder(seederData);                
 
-                if (searchResults?.Count == 0)
+                if (searchResults == null || searchResults?.Count == 0)
                 {
                     Console.WriteLine("No matches found in MusicBrainz database");
                     return;
                 }
+                if (searchResults != null && searchResults.Count > 1)
+                {
+                    Console.WriteLine($"Found {searchResults.Count} matches, selecting best match...");
+                }
 
+                if (searchResults == null)
+                {
+                    Console.WriteLine("Error: Search results are null");
+                    return;
+                }
                 var metadata = searchResults[0]; // Take best match
+
                 Console.WriteLine($"✓ Found match with {metadata.Score:P1} confidence");
 
                 // Step 5: Update tags
@@ -416,16 +462,30 @@ namespace AudioFileMetadataProcessor
             }
         }
 
-        static async Task<string> ConvertAudioFile(string inputPath, ProcessingConfig config)
+        static async Task<string?> ConvertAudioFile(string inputPath, ProcessingConfig config)
         {
             try
             {
-                string? outputDirectory = config.OutputDirectory ?? Path.GetDirectoryName(inputPath);
-                string? fileName = Path.GetFileNameWithoutExtension(inputPath);
-                string? outputPath = Path.Combine(outputDirectory, $"{fileName}.{config.ConvertFormat}");
+                // Use configured output directory if available, otherwise fall back to input directory
+                string? outputDirectory = !string.IsNullOrEmpty(config.OutputDirectory)
+                    ? config.OutputDirectory
+                    : Path.GetDirectoryName(inputPath);
 
+                string? fileName = Path.GetFileNameWithoutExtension(inputPath);
+
+                // Ensure outputDirectory is not null before using it in Path.Combine
+                if (string.IsNullOrEmpty(outputDirectory))
+                {
+                    throw new InvalidOperationException("Output directory cannot be null or empty.");
+                }
+
+                string? outputPath = Path.Combine(outputDirectory, $"{fileName}.{config.ConvertFormat}");
                 // Ensure output directory exists
-                Directory.CreateDirectory(outputDirectory);
+                if (!Directory.Exists(outputDirectory))
+                {
+                    Directory.CreateDirectory(outputDirectory);
+                    Console.WriteLine($"Created output directory: {outputDirectory}");
+                }
 
                 // Build FFmpeg arguments based on target format
                 string? ffmpegArgs = BuildFFmpegArguments(inputPath, outputPath, config);
@@ -475,6 +535,11 @@ namespace AudioFileMetadataProcessor
                 "-i", $"\"{inputPath}\"",
                 "-y" // Overwrite output file
             };
+
+            if (_configuration == null)
+            {
+                throw new InvalidOperationException("Configuration is not loaded.");
+            }
 
             switch (config.ConvertFormat)
             {
@@ -532,7 +597,7 @@ namespace AudioFileMetadataProcessor
             return string.Join(" ", args);
         }
 
-        static SeederData GetSeederDataForFile(string filePath, ProcessingConfig config)
+        static SeederData? GetSeederDataForFile(string filePath, ProcessingConfig config)
         {
             string? fileName = Path.GetFileNameWithoutExtension(filePath);
 
@@ -551,7 +616,7 @@ namespace AudioFileMetadataProcessor
             if (config.SeedersData != null)
             {
                 // Try exact filename match first
-                if (config.SeedersData.TryGetValue(fileName, out SeederData exactMatch))
+                if (config.SeedersData.TryGetValue(fileName, out SeederData? exactMatch))
                 {
                     Console.WriteLine("  Found exact filename match");
                     return exactMatch;
@@ -610,7 +675,7 @@ namespace AudioFileMetadataProcessor
                 if (queryParts.Count == 0) return results;
 
                 string? query = string.Join(" AND ", queryParts);
-                string? encodedQuery = Uri.EscapeDataString(query);                
+                string? encodedQuery = Uri.EscapeDataString(query);
 
                 // Replace the problematic line with a call to the helper method
                 int? searchLimit = GetConfigurationValue("MusicBrainz:SearchLimit", 5);
@@ -619,7 +684,7 @@ namespace AudioFileMetadataProcessor
                 Console.WriteLine($"  Searching MusicBrainz: {query}");
 
                 // Add rate limiting delay
-                int delayMs = GetConfigurationValue("MusicBrainz:RequestDelayMs", 1000); 
+                int delayMs = GetConfigurationValue("MusicBrainz:RequestDelayMs", 1000);
                 if (delayMs > 0)
                 {
                     await Task.Delay(delayMs);
@@ -669,12 +734,17 @@ namespace AudioFileMetadataProcessor
             catch (Exception ex)
             {
                 Console.WriteLine($"MusicBrainz search error: {ex.Message}");
-                return new List<TrackMetadata>();
+                return [];
             }
         }
 
-        static async Task<string> GetCoverArtUrl(string releaseId)
+        static async Task<string?> GetCoverArtUrl(string? releaseId)
         {
+            if (string.IsNullOrEmpty(releaseId))
+            {
+                return null; // Return null if releaseId is null or empty
+            }
+
             try
             {
                 string? coverArtUrl = $"https://coverartarchive.org/release/{releaseId}";
@@ -689,7 +759,7 @@ namespace AudioFileMetadataProcessor
             }
             catch
             {
-                return null;
+                return null; // Return null if an exception occurs
             }
         }
 
@@ -907,7 +977,7 @@ namespace AudioFileMetadataProcessor
 
     public class MusicBrainzArtistCredit
     {
-        public MusicBrainzArtist Artist { get; set; }
+        public MusicBrainzArtist? Artist { get; set; }
     }
 
     public class MusicBrainzArtist
