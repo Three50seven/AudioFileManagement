@@ -497,14 +497,22 @@ namespace MP3FileManager
 
         private static bool IsProcessElevated()
         {
-            try
+            if (OperatingSystem.IsWindows())
             {
-                using System.Security.Principal.WindowsIdentity identity = System.Security.Principal.WindowsIdentity.GetCurrent();
-                System.Security.Principal.WindowsPrincipal principal = new System.Security.Principal.WindowsPrincipal(identity);
-                return principal.IsInRole(role: System.Security.Principal.WindowsBuiltInRole.Administrator);
+                try
+                {
+                    using System.Security.Principal.WindowsIdentity identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+                    System.Security.Principal.WindowsPrincipal principal = new System.Security.Principal.WindowsPrincipal(identity);
+                    return principal.IsInRole(role: System.Security.Principal.WindowsBuiltInRole.Administrator);
+                }
+                catch
+                {
+                    return false;
+                }
             }
-            catch
+            else
             {
+                // On non-Windows platforms, assume the process is not elevated
                 return false;
             }
         }
