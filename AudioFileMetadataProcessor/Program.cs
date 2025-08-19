@@ -4,6 +4,35 @@ using Microsoft.Extensions.Configuration;
 
 namespace AudioFileMetadataProcessor
 {
+    // Add this Logger class inside the namespace but outside Program
+    public static class Logger
+    {
+        private static string? _logFilePath;
+        private static readonly object _lock = new();
+
+        public static void Initialize(string logDirectory)
+        {
+            if (!Directory.Exists(logDirectory))
+            {
+                Directory.CreateDirectory(logDirectory);
+            }
+            _logFilePath = Path.Combine(logDirectory, $"log_{DateTime.Now:yyyyMMdd}.txt");
+        }
+
+        public static void Log(string message)
+        {
+            string logEntry = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}";
+            lock (_lock)
+            {
+                if (!string.IsNullOrEmpty(_logFilePath))
+                {
+                    File.AppendAllText(_logFilePath, logEntry + Environment.NewLine);
+                }
+            }
+            Console.WriteLine(message); // Optional: still show in console
+        }
+    }
+
     class Program
     {
         private static readonly HttpClient _httpClient = new();
@@ -14,15 +43,19 @@ namespace AudioFileMetadataProcessor
 
         static async Task Main(string[] args)
         {
-            Console.WriteLine("Audio Metadata Tagger & Converter");
-            Console.WriteLine("=================================");
-
             // Load configuration
             if (!LoadConfiguration())
             {
                 Console.WriteLine("Failed to load configuration. Please check appsettings.json");
                 return;
             }
+
+            // Initialize logger
+            string logPath = GetConfigurationValue("AppSettings:LogPath", "Logs");
+            Logger.Initialize(logPath);
+
+            Logger.Log("Audio Metadata Tagger & Converter");
+            Logger.Log("=================================");
 
             // Use InputPath from configuration if no arguments provided
             string inputPath;
@@ -34,7 +67,7 @@ namespace AudioFileMetadataProcessor
                     ShowUsage();
                     return;
                 }
-                Console.WriteLine($"Using InputPath from configuration: {inputPath}");
+                Logger.Log($"Using InputPath from configuration: {inputPath}");
             }
             else
             {
@@ -47,8 +80,8 @@ namespace AudioFileMetadataProcessor
             // Check for required tools
             if (config.ConvertFormat != null && !CheckFFmpegAvailable())
             {
-                Console.WriteLine($"FFmpeg is required for audio conversion but was not found at: {_FFMPEG_PATH}");
-                Console.WriteLine("Please install FFmpeg and update the FFmpegPath in appsettings.json");
+                Logger.Log($"FFmpeg is required for audio conversion but was not found at: {_FFMPEG_PATH}");
+                Logger.Log("Please install FFmpeg and update the FFmpegPath in appsettings.json");
                 return;
             }
 
@@ -64,15 +97,15 @@ namespace AudioFileMetadataProcessor
                 }
                 else
                 {
-                    Console.WriteLine("Invalid file or directory path.");
+                    Logger.Log("Invalid file or directory path.");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error: {ex.Message}");
+                Logger.Log($"Error: {ex.Message}");
             }
 
-            Console.WriteLine("\nPress any key to exit...");
+            Logger.Log("\nPress any key to exit...");
             Console.ReadKey();
         }
 
@@ -103,49 +136,44 @@ namespace AudioFileMetadataProcessor
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Configuration error: {ex.Message}");
+                Logger.Log($"Configuration error: {ex.Message}");
                 return false;
             }
         }
 
         static void ShowUsage()
         {
-            Console.WriteLine("Usage:");
-            Console.WriteLine("  AudioMetadataTagger.exe [input_path] [options]");
-            Console.WriteLine();
-            Console.WriteLine("Note: If no input_path is provided, the program will use AppSettings:InputPath from appsettings.json");
-            Console.WriteLine();
-            Console.WriteLine("Options:");
-            Console.WriteLine("  -convert <format>     Convert to specified format (mp3, flac, wav, m4a, ogg)");
-            Console.WriteLine("  -quality <value>      Audio quality for conversion:");
-            Console.WriteLine("                        MP3: 0-9 (0=best, 9=worst) or bitrate (128, 192, 320)");
-            Console.WriteLine("                        FLAC: 0-8 compression level");
-            Console.WriteLine("                        M4A: bitrate (128, 192, 256, 320)");
-            Console.WriteLine("  -output <directory>   Output directory for converted files");
-            Console.WriteLine("                        (Uses AppSettings:OutputPath from config if not specified)");
-            Console.WriteLine("  -preserve-original    Keep original files when converting");
-            Console.WriteLine("  -artist <name>        Artist name for metadata search");
-            Console.WriteLine("  -title <name>         Song title for metadata search");
-            Console.WriteLine("  -album <name>         Album name for metadata search");
-            Console.WriteLine("  -seeders-file <path>  CSV file with seeder data (artist,title,album,filename)");
-            Console.WriteLine("                        (Uses AppSettings:SeedersFileCSVFullPath from config if not specified)");
-            Console.WriteLine();
-            Console.WriteLine("AppSettings.json Configuration:");
-            Console.WriteLine("  \"AppSettings\": {");
-            Console.WriteLine("    \"SeedersFileCSVFullPath\": \"C:\\\\Data\\\\_Template.csv\",");
-            Console.WriteLine("    \"OutputPath\": \"C:\\\\Data\\\\mp3\"");
-            Console.WriteLine("  }");
-            Console.WriteLine();
-            Console.WriteLine("CSV Format:");
-            Console.WriteLine("  artist,title,album,filename");
-            Console.WriteLine("  \"The Beatles\",\"Hey Jude\",\"The Beatles 1967-1970\",\"hey-jude\"");
-            Console.WriteLine("  \"Queen\",\"Bohemian Rhapsody\",\"A Night at the Opera\",\"\"");
-            Console.WriteLine();
-            Console.WriteLine("Examples:");
-            Console.WriteLine("  AudioMetadataTagger.exe (uses config paths)");
-            Console.WriteLine("  AudioMetadataTagger.exe \"song.wav\" -artist \"The Beatles\" -title \"Hey Jude\"");
-            Console.WriteLine("  AudioMetadataTagger.exe \"C:\\Music\" -convert mp3");
-            Console.WriteLine("  AudioMetadataTagger.exe -convert flac -quality 5");
+            Logger.Log("Usage:");
+            Logger.Log("  AudioMetadataTagger.exe [input_path] [options]\n\n");
+            Logger.Log("Note: If no input_path is provided, the program will use AppSettings:InputPath from appsettings.json\n\n");
+            Logger.Log("Options:");
+            Logger.Log("  -convert <format>     Convert to specified format (mp3, flac, wav, m4a, ogg)");
+            Logger.Log("  -quality <value>      Audio quality for conversion:");
+            Logger.Log("                        MP3: 0-9 (0=best, 9=worst) or bitrate (128, 192, 320)");
+            Logger.Log("                        FLAC: 0-8 compression level");
+            Logger.Log("                        M4A: bitrate (128, 192, 256, 320)");
+            Logger.Log("  -output <directory>   Output directory for converted files");
+            Logger.Log("                        (Uses AppSettings:OutputPath from config if not specified)");
+            Logger.Log("  -preserve-original    Keep original files when converting");
+            Logger.Log("  -artist <name>        Artist name for metadata search");
+            Logger.Log("  -title <name>         Song title for metadata search");
+            Logger.Log("  -album <name>         Album name for metadata search");
+            Logger.Log("  -seeders-file <path>  CSV file with seeder data (artist,title,album,filename)");
+            Logger.Log("                        (Uses AppSettings:SeedersFileCSVFullPath from config if not specified)\n\n");
+            Logger.Log("AppSettings.json Configuration:");
+            Logger.Log("  \"AppSettings\": {");
+            Logger.Log("    \"SeedersFileCSVFullPath\": \"C:\\\\Data\\\\_Template.csv\",");
+            Logger.Log("    \"OutputPath\": \"C:\\\\Data\\\\mp3\"");
+            Logger.Log("  }");
+            Logger.Log("\n\nCSV Format:");
+            Logger.Log("  artist,title,album,filename");
+            Logger.Log("  \"The Beatles\",\"Hey Jude\",\"The Beatles 1967-1970\",\"hey-jude\"");
+            Logger.Log("  \"Queen\",\"Bohemian Rhapsody\",\"A Night at the Opera\",\"\"");
+            Logger.Log("\n\nExamples:");
+            Logger.Log("  AudioMetadataTagger.exe (uses config paths)");
+            Logger.Log("  AudioMetadataTagger.exe \"song.wav\" -artist \"The Beatles\" -title \"Hey Jude\"");
+            Logger.Log("  AudioMetadataTagger.exe \"C:\\Music\" -convert mp3");
+            Logger.Log("  AudioMetadataTagger.exe -convert flac -quality 5");
         }
 
         static ProcessingConfig? ParseArguments(string[] args, string inputPath)
@@ -205,8 +233,8 @@ namespace AudioFileMetadataProcessor
                 var validFormats = new[] { "mp3", "flac", "wav", "m4a", "ogg" };
                 if (!validFormats.Contains(config.ConvertFormat))
                 {
-                    Console.WriteLine($"Invalid format: {config.ConvertFormat}");
-                    Console.WriteLine($"Valid formats: {string.Join(", ", validFormats)}");
+                    Logger.Log($"Invalid format: {config.ConvertFormat}");
+                    Logger.Log($"Valid formats: {string.Join(", ", validFormats)}");
                     return null;
                 }
             }
@@ -217,7 +245,7 @@ namespace AudioFileMetadataProcessor
                 config.SeedersData = LoadSeedersFile(config.SeedersFile);
                 if (config.SeedersData == null)
                 {
-                    Console.WriteLine($"Failed to load seeders file: {config.SeedersFile}");
+                    Logger.Log($"Failed to load seeders file: {config.SeedersFile}");
                     return null;
                 }
             }
@@ -226,7 +254,7 @@ namespace AudioFileMetadataProcessor
             if (string.IsNullOrEmpty(config.SeederArtist) && string.IsNullOrEmpty(config.SeederTitle) &&
                 config.SeedersData == null)
             {
-                Console.WriteLine("Error: No seeder data provided. Use -artist/-title or -seeders-file or configure AppSettings:SeedersFileCSVFullPath");
+                Logger.Log("Error: No seeder data provided. Use -artist/-title or -seeders-file or configure AppSettings:SeedersFileCSVFullPath");
                 return null;
             }
 
@@ -240,7 +268,7 @@ namespace AudioFileMetadataProcessor
                 var seedersData = new Dictionary<string, SeederData>(StringComparer.OrdinalIgnoreCase);
                 var lines = System.IO.File.ReadAllLines(filePath);
 
-                Console.WriteLine($"Loading seeders from: {filePath}");
+                Logger.Log($"Loading seeders from: {filePath}");
 
                 bool isFirstLine = true;
                 foreach (var line in lines)
@@ -276,12 +304,12 @@ namespace AudioFileMetadataProcessor
                     }
                 }
 
-                Console.WriteLine($"Loaded {seedersData.Count} seeder entries");
+                Logger.Log($"Loaded {seedersData.Count} seeder entries");
                 return seedersData;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error loading seeders file: {ex.Message}");
+                Logger.Log($"Error loading seeders file: {ex.Message}");
                 return null;
             }
         }
@@ -327,7 +355,7 @@ namespace AudioFileMetadataProcessor
                 });
                 if (process == null)
                 {
-                    Console.WriteLine("FFmpeg process could not be started. Check the FFmpeg path in appsettings.json.");
+                    Logger.Log("FFmpeg process could not be started. Check the FFmpeg path in appsettings.json.");
                     return false;
                 }
                 process.WaitForExit();
@@ -352,7 +380,7 @@ namespace AudioFileMetadataProcessor
             foreach (string filePath in audioFiles)
             {
                 currentFile++;
-                Console.WriteLine($"\n[{currentFile}/{totalFiles}] Processing: {Path.GetFileName(filePath)}");
+                Logger.Log($"\n[{currentFile}/{totalFiles}] Processing: {Path.GetFileName(filePath)}");
                 await ProcessAudioFile(filePath, config);
             }
         }
@@ -361,7 +389,7 @@ namespace AudioFileMetadataProcessor
         {
             try
             {
-                Console.WriteLine($"Analyzing: {Path.GetFileName(filePath)}");
+                Logger.Log($"Analyzing: {Path.GetFileName(filePath)}");
 
                 string? workingFilePath = filePath;
 
@@ -372,23 +400,23 @@ namespace AudioFileMetadataProcessor
 
                     if (currentExtension != config.ConvertFormat)
                     {
-                        Console.WriteLine($"Converting from {currentExtension.ToUpper()} to {config.ConvertFormat.ToUpper()}...");
+                        Logger.Log($"Converting from {currentExtension.ToUpper()} to {config.ConvertFormat.ToUpper()}...");
 
                         string? convertedPath = await ConvertAudioFile(filePath, config);
                         if (convertedPath != null)
                         {
                             workingFilePath = convertedPath;
-                            Console.WriteLine("✓ Conversion completed");
+                            Logger.Log("✓ Conversion completed");
                         }
                         else
                         {
-                            Console.WriteLine("✗ Conversion failed");
+                            Logger.Log("✗ Conversion failed");
                             return;
                         }
                     }
                     else
                     {
-                        Console.WriteLine($"File is already in {config.ConvertFormat.ToUpper()} format");
+                        Logger.Log($"File is already in {config.ConvertFormat.ToUpper()} format");
                     }
                 }
 
@@ -397,7 +425,7 @@ namespace AudioFileMetadataProcessor
 
                 if (seederData == null)
                 {
-                    Console.WriteLine("No seeder data found for this file");
+                    Logger.Log("No seeder data found for this file");
                     return;
                 }
 
@@ -406,41 +434,41 @@ namespace AudioFileMetadataProcessor
                 DisplayCurrentTags(currentTags);
 
                 // Step 4: Search MusicBrainz using seeder data
-                Console.WriteLine($"Searching with: {seederData.Artist} - {seederData.Title}");
+                Logger.Log($"Searching with: {seederData.Artist} - {seederData.Title}");
                 var searchResults = await SearchMusicBrainzBySeeder(seederData);                
 
                 if (searchResults == null || searchResults?.Count == 0)
                 {
-                    Console.WriteLine("No matches found in MusicBrainz database");
+                    Logger.Log("No matches found in MusicBrainz database");
                     return;
                 }
                 if (searchResults != null && searchResults.Count > 1)
                 {
-                    Console.WriteLine($"Found {searchResults.Count} matches, selecting best match...");
+                    Logger.Log($"Found {searchResults.Count} matches, selecting best match...");
                 }
 
                 if (searchResults == null)
                 {
-                    Console.WriteLine("Error: Search results are null");
+                    Logger.Log("Error: Search results are null");
                     return;
                 }
                 var metadata = searchResults[0]; // Take best match
 
-                Console.WriteLine($"✓ Found match with {metadata.Score:P1} confidence");
+                Logger.Log($"✓ Found match with {metadata.Score:P1} confidence");
 
                 // Step 5: Update tags
-                Console.WriteLine("Updating metadata...");
+                Logger.Log("Updating metadata...");
                 UpdateTags(workingFilePath, metadata);
 
                 // Step 6: Download and embed artwork
                 if (!string.IsNullOrEmpty(metadata.CoverArtUrl))
                 {
-                    Console.WriteLine("Downloading and embedding artwork...");
+                    Logger.Log("Downloading and embedding artwork...");
                     await EmbedArtwork(workingFilePath, metadata.CoverArtUrl);
                 }
 
                 DisplayUpdatedMetadata(metadata);
-                Console.WriteLine("✓ File updated successfully!");
+                Logger.Log("✓ File updated successfully!");
 
                 // Clean up original file if conversion happened and preserve flag is not set
                 if (config.ConvertFormat != null && workingFilePath != filePath && !config.PreserveOriginal)
@@ -448,17 +476,17 @@ namespace AudioFileMetadataProcessor
                     try
                     {
                         System.IO.File.Delete(filePath);
-                        Console.WriteLine("✓ Original file removed");
+                        Logger.Log("✓ Original file removed");
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"Warning: Could not remove original file: {ex.Message}");
+                        Logger.Log($"Warning: Could not remove original file: {ex.Message}");
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error processing {Path.GetFileName(filePath)}: {ex.Message}");
+                Logger.Log($"Error processing {Path.GetFileName(filePath)}: {ex.Message}");
             }
         }
 
@@ -484,7 +512,7 @@ namespace AudioFileMetadataProcessor
                 if (!Directory.Exists(outputDirectory))
                 {
                     Directory.CreateDirectory(outputDirectory);
-                    Console.WriteLine($"Created output directory: {outputDirectory}");
+                    Logger.Log($"Created output directory: {outputDirectory}");
                 }
 
                 // Build FFmpeg arguments based on target format
@@ -517,13 +545,13 @@ namespace AudioFileMetadataProcessor
                 }
                 else
                 {
-                    Console.WriteLine($"FFmpeg error: {error}");
+                    Logger.Log($"FFmpeg error: {error}");
                     return null;
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Conversion error: {ex.Message}");
+                Logger.Log($"Conversion error: {ex.Message}");
                 return null;
             }
         }
@@ -618,7 +646,7 @@ namespace AudioFileMetadataProcessor
                 // Try exact filename match first
                 if (config.SeedersData.TryGetValue(fileName, out SeederData? exactMatch))
                 {
-                    Console.WriteLine("  Found exact filename match");
+                    Logger.Log("  Found exact filename match");
                     return exactMatch;
                 }
 
@@ -629,7 +657,7 @@ namespace AudioFileMetadataProcessor
 
                 if (partialMatch != null)
                 {
-                    Console.WriteLine("  Found partial filename match");
+                    Logger.Log("  Found partial filename match");
                     return partialMatch;
                 }
 
@@ -646,7 +674,7 @@ namespace AudioFileMetadataProcessor
 
                 if (fuzzyMatch != null)
                 {
-                    Console.WriteLine($"  Found fuzzy match: {fuzzyMatch.Artist} - {fuzzyMatch.Title}");
+                    Logger.Log($"  Found fuzzy match: {fuzzyMatch.Artist} - {fuzzyMatch.Title}");
                     return fuzzyMatch;
                 }
             }
@@ -681,7 +709,7 @@ namespace AudioFileMetadataProcessor
                 int? searchLimit = GetConfigurationValue("MusicBrainz:SearchLimit", 5);
                 string? searchUrl = $"{_MUSICBRAINZ_BASE_URL}recording?query={encodedQuery}&limit={searchLimit}&fmt=json";
 
-                Console.WriteLine($"  Searching MusicBrainz: {query}");
+                Logger.Log($"  Searching MusicBrainz: {query}");
 
                 // Add rate limiting delay
                 int delayMs = GetConfigurationValue("MusicBrainz:RequestDelayMs", 1000);
@@ -725,7 +753,7 @@ namespace AudioFileMetadataProcessor
                         }
 
                         results.Add(metadata);
-                        Console.WriteLine($"  Found: {metadata.Artist} - {metadata.Title} (Score: {metadata.Score:P1})");
+                        Logger.Log($"  Found: {metadata.Artist} - {metadata.Title} (Score: {metadata.Score:P1})");
                     }
                 }
 
@@ -733,7 +761,7 @@ namespace AudioFileMetadataProcessor
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"MusicBrainz search error: {ex.Message}");
+                Logger.Log($"MusicBrainz search error: {ex.Message}");
                 return [];
             }
         }
@@ -782,7 +810,7 @@ namespace AudioFileMetadataProcessor
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error reading tags: {ex.Message}");
+                Logger.Log($"Error reading tags: {ex.Message}");
             }
 
             return tags;
@@ -790,30 +818,30 @@ namespace AudioFileMetadataProcessor
 
         static void DisplayCurrentTags(Dictionary<string, string> tags)
         {
-            Console.WriteLine("Current metadata:");
+            Logger.Log("Current metadata:");
             foreach (var tag in tags)
             {
                 if (!string.IsNullOrEmpty(tag.Value) && tag.Value != "0")
-                    Console.WriteLine($"  {tag.Key}: {tag.Value}");
+                    Logger.Log($"  {tag.Key}: {tag.Value}");
             }
         }
 
         static void DisplayUpdatedMetadata(TrackMetadata metadata)
         {
-            Console.WriteLine("Updated metadata:");
-            Console.WriteLine($"  Title: {metadata.Title}");
-            Console.WriteLine($"  Artist: {metadata.Artist}");
-            Console.WriteLine($"  Album: {metadata.Album}");
+            Logger.Log("Updated metadata:");
+            Logger.Log($"  Title: {metadata.Title}");
+            Logger.Log($"  Artist: {metadata.Artist}");
+            Logger.Log($"  Album: {metadata.Album}");
             if (!string.IsNullOrEmpty(metadata.AlbumArtist))
-                Console.WriteLine($"  Album Artist: {metadata.AlbumArtist}");
+                Logger.Log($"  Album Artist: {metadata.AlbumArtist}");
             if (!string.IsNullOrEmpty(metadata.ReleaseDate))
-                Console.WriteLine($"  Year: {metadata.ReleaseDate}");
+                Logger.Log($"  Year: {metadata.ReleaseDate}");
             if (metadata.TrackNumber > 0)
-                Console.WriteLine($"  Track: {metadata.TrackNumber}");
+                Logger.Log($"  Track: {metadata.TrackNumber}");
             if (!string.IsNullOrEmpty(metadata.Genre))
-                Console.WriteLine($"  Genre: {metadata.Genre}");
+                Logger.Log($"  Genre: {metadata.Genre}");
             if (!string.IsNullOrEmpty(metadata.CoverArtUrl))
-                Console.WriteLine($"  Cover Art: Embedded");
+                Logger.Log($"  Cover Art: Embedded");
         }
 
         static void UpdateTags(string filePath, TrackMetadata metadata)
@@ -851,7 +879,7 @@ namespace AudioFileMetadataProcessor
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error updating tags: {ex.Message}");
+                Logger.Log($"Error updating tags: {ex.Message}");
             }
         }
 
@@ -878,11 +906,11 @@ namespace AudioFileMetadataProcessor
                     file.Save();
                 }
 
-                Console.WriteLine("✓ Artwork embedded successfully");
+                Logger.Log("✓ Artwork embedded successfully");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error embedding artwork: {ex.Message}");
+                Logger.Log($"Error embedding artwork: {ex.Message}");
             }
         }
 
