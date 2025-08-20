@@ -41,6 +41,13 @@ namespace AudioFileMetadataProcessor
         private static string? _FFMPEG_PATH;
         internal static readonly string[] _stringArray = [".mp3", ".flac", ".m4a", ".ogg", ".wav", ".wma", ".aac"];
 
+        // Add a static instance of JsonSerializerOptions to cache and reuse
+        private static readonly JsonSerializerOptions _jsonSerializerOptions = new()
+        {
+            PropertyNameCaseInsensitive = true
+        };
+
+
         static async Task Main(string[] args)
         {
             // Load configuration
@@ -704,11 +711,10 @@ namespace AudioFileMetadataProcessor
 
                 string? query = string.Join(" AND ", queryParts);
                 string? encodedQuery = Uri.EscapeDataString(query);
-
-                // Replace the problematic line with a call to the helper method
                 int? searchLimit = GetConfigurationValue("MusicBrainz:SearchLimit", 5);
-                string? searchUrl = $"{_MUSICBRAINZ_BASE_URL}recording?query={encodedQuery}&limit={searchLimit}&fmt=json";
+                string? searchUrl = $"{_MUSICBRAINZ_BASE_URL}recording/?query={encodedQuery}&limit={searchLimit}&fmt=json";
 
+                Logger.Log($"  Searching MusicBrainz URL: {searchUrl}");
                 Logger.Log($"  Searching MusicBrainz: {query}");
 
                 // Add rate limiting delay
@@ -719,33 +725,91 @@ namespace AudioFileMetadataProcessor
                 }
 
                 var response = await _httpClient.GetStringAsync(searchUrl);
-                var searchResult = JsonSerializer.Deserialize<MusicBrainzSearchResponse>(response);
+                
+                var searchResult = JsonSerializer.Deserialize<MusicBrainzSearchResponse>(
+                    response,
+                    _jsonSerializerOptions
+                );
 
                 if (searchResult?.Recordings != null)
                 {
+                    Logger.Log($"  Found {searchResult.Recordings.Length} recordings matching query");
+                    
                     int maxResults = GetConfigurationValue("MusicBrainz:MaxResults", 3);
 
                     foreach (var recording in searchResult.Recordings.Take(maxResults))
                     {
+                        var artist = recording.ArtistCredit?.Select(ac => ac.Artist?.Name).FirstOrDefault() ?? "";
+
                         var metadata = new TrackMetadata
                         {
                             Title = recording.Title,
-                            Artist = recording.ArtistCredit?[0]?.Artist?.Name ?? "",
+                            Artist = artist,
                             Duration = recording.Length / 1000.0,
                             Score = recording.Score / 100.0 // Convert to 0-1 range
                         };
 
+                        if (recording.Releases == null || recording.Releases.Length == 0)
+                        {
+                            Logger.Log("  No releases found for this recording");
+                            continue;
+                        }
+
                         // Get detailed release info
                         if (recording.Releases?.Length > 0)
                         {
-                            var release = recording.Releases[0];
-                            metadata.Album = release.Title;
-                            metadata.ReleaseDate = release.Date;
+                            Logger.Log($"  Found {recording.Releases.Length} releases for \"{recording.Title}\"");
 
-                            // Get album artist
-                            if (release.ArtistCredit?.Length > 0)
+                            // intialize release with seeder album if available
+                            var release = recording.Releases.FirstOrDefault(r => string.Equals(r.Title, seeder.Album, StringComparison.OrdinalIgnoreCase))
+                                   ?? recording.Releases.FirstOrDefault();
+
+                            // filtering for US releases with official status
+                            var officialUSReleases = recording.Releases.Where(r => r.Country == "US" && r.Status == "Official");
+
+                            if (officialUSReleases.Any())
                             {
-                                metadata.AlbumArtist = release.ArtistCredit[0].Artist?.Name;
+                                // if we have an official US seeder-matching album/release, try to match it from MusicBrainz
+                                release = officialUSReleases?
+                                   .FirstOrDefault(r => string.Equals(r.Title, seeder.Album, StringComparison.OrdinalIgnoreCase))
+                                   ?? officialUSReleases?.FirstOrDefault();                               
+                            }
+                            else
+                            {
+                                Logger.Log("  No official US releases found for this recording, falling back to first release result.");                                
+                            }
+
+                            if (release != null)
+                            {
+                                metadata.Album = release.Title;
+                                metadata.ReleaseDate = release.Date;
+                                metadata.AlbumArtist = string.Join(", ", release.ArtistCredit?.Select(ac => ac.Artist?.Name) ?? []);
+
+                                // Get track number if available
+                                int? trackNumber = null;
+                                if (release.Media != null && release.Media.Length > 0)
+                                {
+                                    // Try to find the track that matches the seeder title
+                                    foreach (var media in release.Media)
+                                    {
+                                        if (media.Track != null)
+                                        {
+                                            var track = media.Track.FirstOrDefault(t =>
+                                                string.Equals(t.Title, seeder.Title, StringComparison.OrdinalIgnoreCase));
+                                            if (track != null && int.TryParse(track.Number, out int num))
+                                            {
+                                                trackNumber = num;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                                metadata.TrackNumber = trackNumber ?? 0;
+                            }
+                            else
+                            {
+                                Logger.Log("  No matching release found for this recording");
+                                continue;
                             }
 
                             // Get cover art
@@ -768,7 +832,7 @@ namespace AudioFileMetadataProcessor
 
         static async Task<string?> GetCoverArtUrl(string? releaseId)
         {
-            if (string.IsNullOrEmpty(releaseId))
+            if (string.IsNullOrEmpty(releaseId))       
             {
                 return null; // Return null if releaseId is null or empty
             }
@@ -777,7 +841,10 @@ namespace AudioFileMetadataProcessor
             {
                 string? coverArtUrl = $"https://coverartarchive.org/release/{releaseId}";
                 var response = await _httpClient.GetStringAsync(coverArtUrl);
-                var coverArt = JsonSerializer.Deserialize<CoverArtResponse>(response);
+                var coverArt = JsonSerializer.Deserialize<CoverArtResponse>(
+                    response,
+                    _jsonSerializerOptions
+                );
 
                 // Get the front cover or first available image
                 var frontCover = coverArt?.Images?.FirstOrDefault(img =>
@@ -1018,12 +1085,27 @@ namespace AudioFileMetadataProcessor
         public string? Id { get; set; }
         public string? Title { get; set; }
         public string? Date { get; set; }
+        public string? Country { get; set; }
+        public string? Status { get; set; }
         public MusicBrainzArtistCredit[]? ArtistCredit { get; set; }
+        public MusicBrainzMedia[]? Media { get; set; }
     }
 
     public class MusicBrainzGenre
     {
         public string? Name { get; set; }
+    }
+
+    public class MusicBrainzMedia
+    {
+        public string? Format { get; set; }
+        public MusicBrainzTrack[]? Track { get; set; }
+    }
+
+    public class MusicBrainzTrack
+    {
+        public string? Title { get; set; }
+        public string? Number { get; set; } // Track number as string
     }
 
     // Cover Art Archive API response classes
