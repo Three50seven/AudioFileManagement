@@ -27,9 +27,9 @@ Batch Processing with CSV:
 # Convert and tag entire collection
 AudioFileMetadataProcessor.exe "C:\Music\Collection" -seeders-file "metadata.csv" -convert mp3 -quality 320
 ```
-# FLAC conversion with custom output
+# MP3 conversion with custom output
 ```
-AudioFileMetadataProcessor.exe "C:\Albums" -seeders-file "tracklist.csv" -convert flac -output "C:\Converted" -preserve-original
+AudioFileMetadataProcessor.exe "C:\Albums" -seeders-file "tracklist.csv" -convert mp3 -output "C:\Converted" -preserve-original
 ```
 Single File Processing:
 ```
@@ -37,5 +37,5 @@ Single File Processing:
 AudioFileMetadataProcessor.exe "song.wav" -artist "The Beatles" -title "Yesterday" -convert mp3
 
 # Tag with album info
-AudioFileMetadataProcessor.exe "track.flac" -artist "Pink Floyd" -title "Money" -album "The Dark Side of the Moon"
+AudioFileMetadataProcessor.exe "track.mp3" -artist "Pink Floyd" -title "Money" -album "The Dark Side of the Moon"
 ```
