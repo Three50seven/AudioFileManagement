@@ -7,26 +7,36 @@ namespace AudioFileMetadataProcessor.Helpers
     {
         /// <summary>
         /// Converts a string to title case while preserving certain exceptions like and, the, or etc. when they are in the middle of a word.
+        /// ref: https://apastyle.apa.org/style-grammar-guidelines/capitalization/title-case
         /// </summary>
         /// <param name="title"></param>
         /// <returns></returns>
         public static string ToTitleCaseWithExceptions(string title)
         {
-            // Define the list of words to lowercase
-            string[] exceptions = ["the", "a", "an", "and", "or", "but", "nor", "on", "at", "to", "from", "by"];
+            string[] exceptions = ["the", "a", "an", "and", "as", "but", "for",
+                "if", "nor", "or", "so", "yet", "as", "at", "by", "for", "in", "of",
+                "off", "on", "per", "to", "up", "via"];
 
-            // Use ToTitleCase to capitalize each word
+            if (string.IsNullOrWhiteSpace(title))
+                return title;
+
             TextInfo textInfo = new CultureInfo("en-US", false).TextInfo;
-            string titleCased = textInfo.ToTitleCase(title.ToLower());
+            string[] words = title.ToLower().Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
-            // Create a regex pattern to match the exceptions
-            string pattern = "\\b(" + string.Join("|", exceptions) + ")\\b";
-            Regex regex = new(pattern, RegexOptions.IgnoreCase);
+            for (int i = 0; i < words.Length; i++)
+            {
+                string word = words[i];
+                if (i == 0 || i == words.Length - 1 || !exceptions.Contains(word))
+                {
+                    words[i] = textInfo.ToTitleCase(word);
+                }
+                else
+                {
+                    words[i] = word;
+                }
+            }
 
-            // Replace the exceptions with their lowercase versions
-            titleCased = regex.Replace(titleCased, match => match.Value.ToLower());
-
-            return titleCased;
+            return string.Join(' ', words);
         }
     }
 }

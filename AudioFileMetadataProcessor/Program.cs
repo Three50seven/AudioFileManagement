@@ -37,9 +37,7 @@ namespace AudioFileMetadataProcessor
                     throw new InvalidOperationException("Output directory must be specified in AppSettings:OutputPath.");
                 }
 
-                // Get seeder data to create proper filename
-                var seederData = Program.GetSeederDataForFile(inputPath, config);
-                string fileName = CreateOutputFileName(inputPath, seederData);
+                string fileName = Path.GetFileNameWithoutExtension(inputPath);
                 string? outputPath = Path.Combine(outputDirectory, $"{fileName}.{config.ConvertFormat}");
 
                 // Ensure output directory exists
@@ -76,22 +74,7 @@ namespace AudioFileMetadataProcessor
                 Logger.Log($"NAudio conversion error: {ex.Message}");
                 return null;
             }
-        }
-
-        private static string CreateOutputFileName(string inputPath, SeederData? seederData)
-        {
-            if (seederData != null && !string.IsNullOrEmpty(seederData.TrackNumber) && !string.IsNullOrEmpty(seederData.Title))
-            {
-                // Parse track number
-                var trackParts = seederData.TrackNumber.Split('/');
-                string trackNum = trackParts.Length > 0 ? trackParts[0].PadLeft(2, '0') : "00";
-
-                // Clean title for filename
-                string cleanTitle = Program.CleanFilename(Program.ToProperCase(seederData.Title));
-                return $"{trackNum} {cleanTitle}";
-            }
-            return Path.GetFileNameWithoutExtension(inputPath);
-        }
+        }        
 
         private static async Task<bool> ConvertToMp3(string inputPath, string outputPath, string? quality)
         {
@@ -102,7 +85,7 @@ namespace AudioFileMetadataProcessor
                     using var reader = CreateAudioReader(inputPath);
                     if (reader == null) return false;
 
-                    // Determine MP3 quality settings
+                    // Replace the MP3 quality settings block in ConvertToMp3 with the following:
                     LAMEPreset preset = LAMEPreset.STANDARD;
                     int? bitRate = null;
 
@@ -126,7 +109,6 @@ namespace AudioFileMetadataProcessor
                             else // CBR bitrate
                             {
                                 bitRate = qualityValue;
-                                preset = LAMEPreset.ABR_160;
                             }
                         }
                     }
@@ -136,8 +118,16 @@ namespace AudioFileMetadataProcessor
                         new WaveFormat(reader.WaveFormat.SampleRate, 16, reader.WaveFormat.Channels),
                         reader);
 
-                    using var writer = new LameMP3FileWriter(outputPath, resampler.WaveFormat, preset, null);
-                    resampler.CopyTo(writer);
+                    if (bitRate.HasValue)
+                    {
+                        using var writer = new LameMP3FileWriter(outputPath, resampler.WaveFormat, bitRate.Value, null);
+                        resampler.CopyTo(writer);
+                    }
+                    else
+                    {
+                        using var writer = new LameMP3FileWriter(outputPath, resampler.WaveFormat, preset, null);
+                        resampler.CopyTo(writer);
+                    }
 
                     return true;
                 }
@@ -281,11 +271,14 @@ namespace AudioFileMetadataProcessor
         }
     }
 
-    class Program
+    public class Program
     {
         private static readonly HttpClient _httpClient = new();
         private static IConfiguration? _configuration;
         private static string? _MUSICBRAINZ_BASE_URL;
+        private static string? _cacheKey;
+        private static Dictionary<string, byte[]> _coverArtCache = [];
+        private static Dictionary<string, string> _coverArtUrlCache = [];
         internal static readonly string[] _stringArray = [".mp3", ".m4a", ".wav", ".wma", ".aac"];
 
         // Add a static instance of JsonSerializerOptions to cache and reuse
@@ -293,6 +286,10 @@ namespace AudioFileMetadataProcessor
         {
             PropertyNameCaseInsensitive = true
         };
+
+        public static Dictionary<string, byte[]> CoverArtCache { get => _coverArtCache; set => _coverArtCache = value; }
+        public static Dictionary<string, string> CoverArtUrlCache { get => _coverArtUrlCache; set => _coverArtUrlCache = value; }
+        public static string? CacheKey { get => _cacheKey; set => _cacheKey = value; }
 
         static async Task Main(string[] args)
         {
@@ -636,11 +633,14 @@ namespace AudioFileMetadataProcessor
 
                 // Step 4: Create metadata from seeder data
                 Logger.Log($"Using seeder data: {seederData.Artist} - {seederData.Title}");
-                var metadata = CreateMetadataFromSeeder(seederData);
+                var metadata = CreateMetadataFromSeeder(seederData);               
 
                 // Step 5: Try to get cover art from MusicBrainz if album info is available
-                if (!string.IsNullOrEmpty(seederData.Album) && !string.IsNullOrEmpty(seederData.Artist))
+                if (seederData != null && !string.IsNullOrEmpty(seederData.Album) && !string.IsNullOrEmpty(seederData.Artist))
                 {
+                    // Set cache key for cover art - saves multiple requests for same artist/album
+                    CacheKey = $"{seederData.Artist.ToLowerInvariant()}|{seederData.Album.ToLowerInvariant()}";
+
                     Logger.Log("Searching for cover art...");
                     var coverArtUrl = await SearchForCoverArt(seederData);
                     if (!string.IsNullOrEmpty(coverArtUrl))
@@ -667,6 +667,32 @@ namespace AudioFileMetadataProcessor
 
                 DisplayUpdatedMetadata(metadata);
                 Logger.Log("✓ File updated successfully!");
+
+                // Step 8: Rename file based on seeder data
+                string? newFileName = CreateOutputFileName(workingFilePath, seederData);
+                if (newFileName != null) {
+                    string? newFilePath = Path.Combine(Path.GetDirectoryName(workingFilePath) ?? "", $"{newFileName}.{config.ConvertFormat}");
+                    if (newFilePath != workingFilePath)
+                    {
+                        try
+                        {
+                            if (File.Exists(newFilePath))
+                            {
+                                Logger.Log($"Warning: File already exists, skipping rename: {newFilePath}");
+                            }
+                            else
+                            {
+                                File.Move(workingFilePath, newFilePath);
+                                Logger.Log($"✓ Renamed file to: {newFileName}.{config.ConvertFormat}");
+                                workingFilePath = newFilePath; // Update working path to new name
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Log($"Error renaming file: {ex.Message}");
+                        }
+                    }
+                }
 
                 // Clean up original file if conversion happened and preserve flag is not set
                 if (config.ConvertFormat != null && workingFilePath != filePath && !config.PreserveOriginal)
@@ -716,6 +742,21 @@ namespace AudioFileMetadataProcessor
             }
 
             return null;
+        }
+
+        public static string CreateOutputFileName(string inputPath, SeederData? seederData)
+        {
+            if (seederData != null && !string.IsNullOrEmpty(seederData.TrackNumber) && !string.IsNullOrEmpty(seederData.Title))
+            {
+                // Parse track number
+                var trackParts = seederData.TrackNumber.Split('/');
+                string trackNum = trackParts.Length > 0 ? trackParts[0].PadLeft(2, '0') : "00";
+
+                // Clean title for filename
+                string cleanTitle = Program.CleanFilename(Program.ToProperCase(seederData.Title));
+                return $"{trackNum} {cleanTitle}";
+            }
+            return Path.GetFileNameWithoutExtension(inputPath);
         }
 
         public static string CleanFilename(string filename)
@@ -800,11 +841,17 @@ namespace AudioFileMetadataProcessor
 
             return metadata;
         }
-
         static async Task<string?> SearchForCoverArt(SeederData seeder)
         {
             try
-            {
+            {                
+                // Check cache for cover art URL
+                if (!string.IsNullOrEmpty(CacheKey) && CoverArtUrlCache.TryGetValue(CacheKey, out var cachedUrl))
+                {
+                    Logger.Log($"  Using cached cover art URL since artist and album match the key: {CacheKey}");
+                    return cachedUrl;
+                }
+
                 // Build search query for MusicBrainz
                 var queryParts = new List<string>();
 
@@ -850,7 +897,16 @@ namespace AudioFileMetadataProcessor
 
                     if (release?.Id != null)
                     {
-                        return await GetCoverArtUrl(release.Id);
+                        var coverArtUrl = await GetCoverArtUrl(release.Id);
+
+                        // Cache the cover art URL for this artist/album
+                        if (!string.IsNullOrEmpty(CacheKey) && !string.IsNullOrEmpty(coverArtUrl))
+                        {
+                            CoverArtUrlCache ??= [];
+                            CoverArtUrlCache[CacheKey] = coverArtUrl;
+                        }
+
+                        return coverArtUrl;
                     }
                 }
 
@@ -1003,11 +1059,22 @@ namespace AudioFileMetadataProcessor
         {
             try
             {
-                var imageBytes = await _httpClient.GetByteArrayAsync(imageUrl);
+                byte[] imageBytes;
+                if (!string.IsNullOrEmpty(CacheKey) && CoverArtCache.TryGetValue(CacheKey, out var cachedBytes))
+                {
+                    imageBytes = cachedBytes;
+                }
+                else
+                {
+                    imageBytes = await _httpClient.GetByteArrayAsync(imageUrl);
+                    if (!string.IsNullOrEmpty(CacheKey))
+                    {
+                        CoverArtCache[CacheKey] = imageBytes;
+                    }
+                }
 
                 using (var file = TagLib.File.Create(filePath))
                 {
-                    // Determine MIME type from image data
                     string? mimeType = GetImageMimeType(imageBytes);
 
                     var picture = new TagLib.Picture
@@ -1029,7 +1096,6 @@ namespace AudioFileMetadataProcessor
                 Logger.Log($"Error embedding artwork: {ex.Message}");
             }
         }
-
         static string GetImageMimeType(byte[] imageBytes)
         {
             if (imageBytes.Length >= 4)
