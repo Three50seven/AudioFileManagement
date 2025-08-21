@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "AudioFileMetadataProcessor": {
+      "commandName": "Project",
+      "commandLineArgs": "-convert mp3 -quality 192 -preserve-original"
+    }
+  }
+}

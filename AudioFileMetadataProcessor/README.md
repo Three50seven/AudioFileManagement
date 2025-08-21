@@ -12,36 +12,30 @@
 -  Git-Safe - Sensitive config in local files
 
 ## CSV Seeders File Format:
-Simple Format:
 ```
-csvartist,title,album,filename
-"The Beatles","Hey Jude","The Beatles 1967-1970",""
-"Queen","Bohemian Rhapsody","A Night at the Opera","queen_bohemian"
-"Led Zeppelin","Stairway to Heaven","Led Zeppelin IV","stairway"
-```
-
-Advanced Format with Track Numbers:
-```
-csvartist,title,album,filename
-"Pink Floyd","Speak to Me","The Dark Side of the Moon","01-speak-to-me"
-"Pink Floyd","Breathe","The Dark Side of the Moon","02-breathe"
-"Pink Floyd","On the Run","The Dark Side of the Moon","03-on-the-run"
+artist,albumartist,title,album,year,tracknumber,discnumber,genre,filename
+Bullet for my Valentine,Bullet for my Valentine,Pretty on the Outside,Fever,2010,11/11,1/1,metal,Track01
+Bullet for my Valentine,Bullet for my Valentine,Begging for mercy,Fever,2010,10/11,1/1,metal,Track02
+Bullet for my Valentine,Bullet for my Valentine,the last fight,fever,2010,3/11,1/1,metal,Track03
+Kings of Leon,Kings of Leon,back down south,Come Around Sundown,2010,7/16,1/1,alternative,Track04
+Kings of Leon,Kings of Leon,molly's chambers,Youth and Young Manhood,2003,8/12,1/1,alternative,Track05
+Kings of Leon,Kings of Leon,find me,WALLS,2016,4/10,1/1,alternative,Track06
 ```
 ## Usage Examples:
 Batch Processing with CSV:
 ```
 # Convert and tag entire collection
-AudioMetadataTagger.exe "C:\Music\Collection" -seeders-file "metadata.csv" -convert mp3 -quality 320
+AudioFileMetadataProcessor.exe "C:\Music\Collection" -seeders-file "metadata.csv" -convert mp3 -quality 320
 ```
 # FLAC conversion with custom output
 ```
-AudioMetadataTagger.exe "C:\Albums" -seeders-file "tracklist.csv" -convert flac -output "C:\Converted" -preserve-original
+AudioFileMetadataProcessor.exe "C:\Albums" -seeders-file "tracklist.csv" -convert flac -output "C:\Converted" -preserve-original
 ```
 Single File Processing:
 ```
 # Tag single file with manual seeders
-AudioMetadataTagger.exe "song.wav" -artist "The Beatles" -title "Yesterday" -convert mp3
+AudioFileMetadataProcessor.exe "song.wav" -artist "The Beatles" -title "Yesterday" -convert mp3
 
 # Tag with album info
-AudioMetadataTagger.exe "track.flac" -artist "Pink Floyd" -title "Money" -album "The Dark Side of the Moon"
+AudioFileMetadataProcessor.exe "track.flac" -artist "Pink Floyd" -title "Money" -album "The Dark Side of the Moon"
 ```

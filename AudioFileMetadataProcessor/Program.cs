@@ -1,6 +1,7 @@
 ﻿using System.Text.Json;
 using System.Diagnostics;
 using Microsoft.Extensions.Configuration;
+using AudioFileMetadataProcessor.Helpers;
 
 namespace AudioFileMetadataProcessor
 {
@@ -64,22 +65,14 @@ namespace AudioFileMetadataProcessor
             Logger.Log("Audio Metadata Tagger & Converter");
             Logger.Log("=================================");
 
-            // Use InputPath from configuration if no arguments provided
-            string inputPath;
-            if (args.Length == 0)
+            // Always use InputPath from configuration
+            string inputPath = GetConfigurationValue("AppSettings:InputPath", "");
+            if (string.IsNullOrEmpty(inputPath))
             {
-                inputPath = GetConfigurationValue("AppSettings:InputPath", "");
-                if (string.IsNullOrEmpty(inputPath))
-                {
-                    ShowUsage();
-                    return;
-                }
-                Logger.Log($"Using InputPath from configuration: {inputPath}");
+                ShowUsage();
+                return;
             }
-            else
-            {
-                inputPath = args[0];
-            }
+            Logger.Log($"Using InputPath from configuration: {inputPath}");
 
             var config = ParseArguments(args, inputPath);
             if (config == null) return;
@@ -151,7 +144,7 @@ namespace AudioFileMetadataProcessor
         static void ShowUsage()
         {
             Logger.Log("Usage:");
-            Logger.Log("  AudioMetadataTagger.exe [input_path] [options]\n\n");
+            Logger.Log("  AudioFileMetadataProcessor.exe [input_path] [options]\n\n");
             Logger.Log("Note: If no input_path is provided, the program will use AppSettings:InputPath from appsettings.json\n\n");
             Logger.Log("Options:");
             Logger.Log("  -convert <format>     Convert to specified format (mp3, flac, wav, m4a, ogg)");
@@ -162,10 +155,7 @@ namespace AudioFileMetadataProcessor
             Logger.Log("  -output <directory>   Output directory for converted files");
             Logger.Log("                        (Uses AppSettings:OutputPath from config if not specified)");
             Logger.Log("  -preserve-original    Keep original files when converting");
-            Logger.Log("  -artist <name>        Artist name for metadata search");
-            Logger.Log("  -title <name>         Song title for metadata search");
-            Logger.Log("  -album <name>         Album name for metadata search");
-            Logger.Log("  -seeders-file <path>  CSV file with seeder data (artist,title,album,filename)");
+            Logger.Log("  -seeders-file <path>  CSV file with seeder data");
             Logger.Log("                        (Uses AppSettings:SeedersFileCSVFullPath from config if not specified)\n\n");
             Logger.Log("AppSettings.json Configuration:");
             Logger.Log("  \"AppSettings\": {");
@@ -173,14 +163,13 @@ namespace AudioFileMetadataProcessor
             Logger.Log("    \"OutputPath\": \"C:\\\\Data\\\\mp3\"");
             Logger.Log("  }");
             Logger.Log("\n\nCSV Format:");
-            Logger.Log("  artist,title,album,filename");
-            Logger.Log("  \"The Beatles\",\"Hey Jude\",\"The Beatles 1967-1970\",\"hey-jude\"");
-            Logger.Log("  \"Queen\",\"Bohemian Rhapsody\",\"A Night at the Opera\",\"\"");
+            Logger.Log("  artist,albumartist,title,album,year,tracknumber,discnumber,genre,filename");
+            Logger.Log("  \"Bullet for my Valentine\",\"Bullet for my Valentine\",\"Pretty on the Outside\",\"Fever\",\"2010\",\"11/11\",\"1/1\",\"metal\",\"Track01\"");
+            Logger.Log("  \"Kings of Leon\",\"Kings of Leon\",\"back down south\",\"Come Around Sundown\",\"2010\",\"7/16\",\"1/1\",\"alternative\",\"Track04\"");
             Logger.Log("\n\nExamples:");
-            Logger.Log("  AudioMetadataTagger.exe (uses config paths)");
-            Logger.Log("  AudioMetadataTagger.exe \"song.wav\" -artist \"The Beatles\" -title \"Hey Jude\"");
-            Logger.Log("  AudioMetadataTagger.exe \"C:\\Music\" -convert mp3");
-            Logger.Log("  AudioMetadataTagger.exe -convert flac -quality 5");
+            Logger.Log("  AudioFileMetadataProcessor.exe (uses config paths)");
+            Logger.Log("  AudioFileMetadataProcessor.exe \"C:\\Music\" -convert mp3");
+            Logger.Log("  AudioFileMetadataProcessor.exe -convert flac -quality 5");
         }
 
         static ProcessingConfig? ParseArguments(string[] args, string inputPath)
@@ -190,11 +179,8 @@ namespace AudioFileMetadataProcessor
             // Set default output directory from configuration
             config.OutputDirectory = GetConfigurationValue("AppSettings:OutputPath", "");
 
-            // Set default seeders file from configuration if not processing a specific file
-            if (Directory.Exists(inputPath) || string.IsNullOrEmpty(Path.GetExtension(inputPath)))
-            {
-                config.SeedersFile = GetConfigurationValue("AppSettings:SeedersFileCSVFullPath", "");
-            }
+            // Set default seeders file from configuration
+            config.SeedersFile = GetConfigurationValue("AppSettings:SeedersFileCSVFullPath", "");
 
             for (int i = (args.Length > 0 && !args[0].StartsWith("-") ? 1 : 0); i < args.Length; i++)
             {
@@ -214,18 +200,6 @@ namespace AudioFileMetadataProcessor
                         break;
                     case "-preserve-original":
                         config.PreserveOriginal = true;
-                        break;
-                    case "-artist":
-                        if (i + 1 < args.Length)
-                            config.SeederArtist = args[++i];
-                        break;
-                    case "-title":
-                        if (i + 1 < args.Length)
-                            config.SeederTitle = args[++i];
-                        break;
-                    case "-album":
-                        if (i + 1 < args.Length)
-                            config.SeederAlbum = args[++i];
                         break;
                     case "-seeders-file":
                         if (i + 1 < args.Length)
@@ -257,11 +231,10 @@ namespace AudioFileMetadataProcessor
                 }
             }
 
-            // Validate that we have some way to identify tracks
-            if (string.IsNullOrEmpty(config.SeederArtist) && string.IsNullOrEmpty(config.SeederTitle) &&
-                config.SeedersData == null)
+            // Validate that we have seeders data
+            if (config.SeedersData == null)
             {
-                Logger.Log("Error: No seeder data provided. Use -artist/-title or -seeders-file or configure AppSettings:SeedersFileCSVFullPath");
+                Logger.Log("Error: No seeder data provided. Use -seeders-file or configure AppSettings:SeedersFileCSVFullPath");
                 return null;
             }
 
@@ -292,21 +265,25 @@ namespace AudioFileMetadataProcessor
                     isFirstLine = false;
 
                     var parts = ParseCsvLine(trimmedLine);
-                    if (parts.Count >= 2) // Need at least artist and title
+                    if (parts.Count >= 9) // Need all 9 columns: artist,albumartist,title,album,year,tracknumber,discnumber,genre,filename
                     {
                         var seeder = new SeederData
                         {
                             Artist = parts[0].Trim(),
-                            Title = parts[1].Trim(),
-                            Album = parts.Count > 2 ? parts[2].Trim() : "",
-                            FileName = parts.Count > 3 ? parts[3].Trim() : ""
+                            AlbumArtist = parts[1].Trim(),
+                            Title = parts[2].Trim(),
+                            Album = parts[3].Trim(),
+                            Year = parts[4].Trim(),
+                            TrackNumber = parts[5].Trim(),
+                            DiscNumber = parts[6].Trim(),
+                            Genre = parts[7].Trim(),
+                            FileName = parts[8].Trim()
                         };
 
-                        // Use filename as key if provided, otherwise use title
-                        string? key = !string.IsNullOrEmpty(seeder.FileName) ? seeder.FileName : seeder.Title;
-                        if (!string.IsNullOrEmpty(key))
+                        // Use filename as key
+                        if (!string.IsNullOrEmpty(seeder.FileName))
                         {
-                            seedersData[key] = seeder;
+                            seedersData[seeder.FileName] = seeder;
                         }
                     }
                 }
@@ -440,34 +417,31 @@ namespace AudioFileMetadataProcessor
                 var currentTags = ReadCurrentTags(workingFilePath);
                 DisplayCurrentTags(currentTags);
 
-                // Step 4: Search MusicBrainz using seeder data
-                Logger.Log($"Searching with: {seederData.Artist} - {seederData.Title}");
-                var searchResults = await SearchMusicBrainzBySeeder(seederData);                
+                // Step 4: Create metadata from seeder data
+                Logger.Log($"Using seeder data: {seederData.Artist} - {seederData.Title}");
+                var metadata = CreateMetadataFromSeeder(seederData);
 
-                if (searchResults == null || searchResults?.Count == 0)
+                // Step 5: Try to get cover art from MusicBrainz if album info is available
+                if (!string.IsNullOrEmpty(seederData.Album) && !string.IsNullOrEmpty(seederData.Artist))
                 {
-                    Logger.Log("No matches found in MusicBrainz database");
-                    return;
-                }
-                if (searchResults != null && searchResults.Count > 1)
-                {
-                    Logger.Log($"Found {searchResults.Count} matches, selecting best match...");
+                    Logger.Log("Searching for cover art...");
+                    var coverArtUrl = await SearchForCoverArt(seederData);
+                    if (!string.IsNullOrEmpty(coverArtUrl))
+                    {
+                        metadata.CoverArtUrl = coverArtUrl;
+                        Logger.Log("✓ Found cover art");
+                    }
+                    else
+                    {
+                        Logger.Log("No cover art found");
+                    }
                 }
 
-                if (searchResults == null)
-                {
-                    Logger.Log("Error: Search results are null");
-                    return;
-                }
-                var metadata = searchResults[0]; // Take best match
-
-                Logger.Log($"✓ Found match with {metadata.Score:P1} confidence");
-
-                // Step 5: Update tags
+                // Step 6: Update tags
                 Logger.Log("Updating metadata...");
                 UpdateTags(workingFilePath, metadata);
 
-                // Step 6: Download and embed artwork
+                // Step 7: Download and embed artwork if available
                 if (!string.IsNullOrEmpty(metadata.CoverArtUrl))
                 {
                     Logger.Log("Downloading and embedding artwork...");
@@ -501,17 +475,31 @@ namespace AudioFileMetadataProcessor
         {
             try
             {
-                // Use configured output directory if available, otherwise fall back to input directory
-                string? outputDirectory = !string.IsNullOrEmpty(config.OutputDirectory)
-                    ? config.OutputDirectory
-                    : Path.GetDirectoryName(inputPath);
+                // Always use configured output directory from appsettings
+                string? outputDirectory = config.OutputDirectory;
 
-                string? fileName = Path.GetFileNameWithoutExtension(inputPath);
-
-                // Ensure outputDirectory is not null before using it in Path.Combine
                 if (string.IsNullOrEmpty(outputDirectory))
                 {
-                    throw new InvalidOperationException("Output directory cannot be null or empty.");
+                    throw new InvalidOperationException("Output directory must be specified in AppSettings:OutputPath.");
+                }
+
+                // Get seeder data to create proper filename
+                var seederData = GetSeederDataForFile(inputPath, config);
+                string fileName;
+
+                if (seederData != null && !string.IsNullOrEmpty(seederData.TrackNumber) && !string.IsNullOrEmpty(seederData.Title))
+                {
+                    // Parse track number
+                    var trackParts = seederData.TrackNumber.Split('/');
+                    string trackNum = trackParts.Length > 0 ? trackParts[0].PadLeft(2, '0') : "00";
+
+                    // Clean title for filename
+                    string cleanTitle = CleanFilename(ToProperCase(seederData.Title));
+                    fileName = $"{trackNum} {cleanTitle}";
+                }
+                else
+                {
+                    fileName = Path.GetFileNameWithoutExtension(inputPath);
                 }
 
                 string? outputPath = Path.Combine(outputDirectory, $"{fileName}.{config.ConvertFormat}");
@@ -532,19 +520,42 @@ namespace AudioFileMetadataProcessor
                         FileName = _FFMPEG_PATH,
                         Arguments = ffmpegArgs,
                         UseShellExecute = false,
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
+                        RedirectStandardOutput = false, // Don't redirect in debug mode
+                        RedirectStandardError = true,   // Only redirect error for debugging
                         CreateNoWindow = true
                     }
                 };
 
+                Logger.Log($"Converting with FFmpeg...");
+
                 process.Start();
 
-                // Read output to track progress
-                string? output = await process.StandardOutput.ReadToEndAsync();
-                string? error = await process.StandardError.ReadToEndAsync();
+                // Set a reasonable timeout for conversion (5 minutes)
+                var timeout = TimeSpan.FromMinutes(5);
+                bool finished = true; // Assume it will finish unless it times out
 
-                await process.WaitForExitAsync();
+                using (var cts = new CancellationTokenSource(timeout))
+                {
+                    try
+                    {
+                        await process.WaitForExitAsync(cts.Token);
+                        finished = process.HasExited;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        finished = false;
+                    }
+                }
+                if (!finished)
+                {
+                    Logger.Log("FFmpeg conversion timed out, killing process...");
+                    try
+                    {
+                        process.Kill();
+                    }
+                    catch { }
+                    return null;
+                }
 
                 if (process.ExitCode == 0 && System.IO.File.Exists(outputPath))
                 {
@@ -552,7 +563,16 @@ namespace AudioFileMetadataProcessor
                 }
                 else
                 {
-                    Logger.Log($"FFmpeg error: {error}");
+                    // Only read error output if conversion failed
+                    try
+                    {
+                        string? error = process.StandardError.ReadToEnd(); // Use sync version
+                        Logger.Log($"FFmpeg error: {error}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Log($"FFmpeg failed with exit code {process.ExitCode}: {ex.Message}");
+                    }
                     return null;
                 }
             }
@@ -568,7 +588,8 @@ namespace AudioFileMetadataProcessor
             var args = new List<string>
             {
                 "-i", $"\"{inputPath}\"",
-                "-y" // Overwrite output file
+                "-y", // Overwrite output file
+                "-threads", "0" // Use all available CPU cores
             };
 
             if (_configuration == null)
@@ -615,6 +636,7 @@ namespace AudioFileMetadataProcessor
 
                 case "m4a":
                     args.AddRange(new[] { "-codec:a", "aac" });
+                    args.AddRange(new[] { "-movflags", "+faststart" }); // Optimize for streaming
                     var m4aBitrate = !string.IsNullOrEmpty(config.Quality) ? config.Quality
                         : _configuration["Conversion:DefaultQualities:M4a"] ?? "192";
                     args.AddRange(new[] { "-b:a", $"{m4aBitrate}k" });
@@ -636,17 +658,6 @@ namespace AudioFileMetadataProcessor
         {
             string? fileName = Path.GetFileNameWithoutExtension(filePath);
 
-            // Check command line seeders first
-            if (!string.IsNullOrEmpty(config.SeederArtist) || !string.IsNullOrEmpty(config.SeederTitle))
-            {
-                return new SeederData
-                {
-                    Artist = config.SeederArtist ?? "",
-                    Title = config.SeederTitle ?? "",
-                    Album = config.SeederAlbum ?? ""
-                };
-            }
-
             // Check seeders file data
             if (config.SeedersData != null)
             {
@@ -667,55 +678,79 @@ namespace AudioFileMetadataProcessor
                     Logger.Log("  Found partial filename match");
                     return partialMatch;
                 }
-
-                // Try fuzzy matching with artist - title pattern in filename
-                var fuzzyMatch = config.SeedersData.Values.FirstOrDefault(s =>
-                {
-                    if (string.IsNullOrEmpty(s.Artist) || string.IsNullOrEmpty(s.Title)) return false;
-
-                    var artistInName = fileName.Contains(s.Artist, StringComparison.OrdinalIgnoreCase);
-                    var titleInName = fileName.Contains(s.Title, StringComparison.OrdinalIgnoreCase);
-
-                    return artistInName && titleInName;
-                });
-
-                if (fuzzyMatch != null)
-                {
-                    Logger.Log($"  Found fuzzy match: {fuzzyMatch.Artist} - {fuzzyMatch.Title}");
-                    return fuzzyMatch;
-                }
             }
 
             return null;
         }
 
-        static async Task<List<TrackMetadata>> SearchMusicBrainzBySeeder(SeederData seeder)
+        static TrackMetadata CreateMetadataFromSeeder(SeederData seeder)
+        {
+            var metadata = new TrackMetadata
+            {
+                Title = ToProperCase(seeder.Title),
+                Artist = ToProperCase(seeder.Artist),
+                Album = ToProperCase(seeder.Album),
+                AlbumArtist = ToProperCase(seeder.AlbumArtist),
+                Genre = ToProperCase(seeder.Genre),
+                ReleaseDate = seeder.Year
+            };
+
+            // Parse track number
+            if (!string.IsNullOrEmpty(seeder.TrackNumber))
+            {
+                var trackParts = seeder.TrackNumber.Split('/');
+                if (trackParts.Length > 0 && int.TryParse(trackParts[0], out int trackNum))
+                {
+                    metadata.TrackNumber = trackNum;
+                }
+                if (trackParts.Length > 1 && int.TryParse(trackParts[1], out int trackCount))
+                {
+                    metadata.TrackCount = trackCount;
+                }
+            }
+
+            // Parse disc number
+            if (!string.IsNullOrEmpty(seeder.DiscNumber))
+            {
+                var discParts = seeder.DiscNumber.Split('/');
+                if (discParts.Length > 0 && int.TryParse(discParts[0], out int discNum))
+                {
+                    metadata.DiscNumber = discNum;
+                }
+                if(discParts.Length > 1 && int.TryParse(discParts[1], out int discCount))
+                {
+                    metadata.DiscCount = discCount;
+                }
+            }
+
+            return metadata;
+        }
+
+        static async Task<string?> SearchForCoverArt(SeederData seeder)
         {
             try
             {
-                var results = new List<TrackMetadata>();
-
-                // Build search query
+                // Build search query for MusicBrainz
                 var queryParts = new List<string>();
-
-                if (!string.IsNullOrEmpty(seeder.Title))
-                    queryParts.Add($"recording:\"{seeder.Title}\"");
-
-                if (!string.IsNullOrEmpty(seeder.Artist))
-                    queryParts.Add($"artist:\"{seeder.Artist}\"");
 
                 if (!string.IsNullOrEmpty(seeder.Album))
                     queryParts.Add($"release:\"{seeder.Album}\"");
 
-                if (queryParts.Count == 0) return results;
+                if (!string.IsNullOrEmpty(seeder.Artist))
+                    queryParts.Add($"artist:\"{seeder.Artist}\"");
+
+                queryParts.Add("status:official");
+                queryParts.Add("format:cd");
+                queryParts.Add("type:album");
+                queryParts.Add("country:us");                
+
+                if (queryParts.Count == 0) return null;
 
                 string? query = string.Join(" AND ", queryParts);
                 string? encodedQuery = Uri.EscapeDataString(query);
-                int? searchLimit = GetConfigurationValue("MusicBrainz:SearchLimit", 5);
-                string? searchUrl = $"{_MUSICBRAINZ_BASE_URL}recording/?query={encodedQuery}&limit={searchLimit}&fmt=json";
+                string? searchUrl = $"{_MUSICBRAINZ_BASE_URL}release/?query={encodedQuery}&limit=3&fmt=json";
 
-                Logger.Log($"  Searching MusicBrainz URL: {searchUrl}");
-                Logger.Log($"  Searching MusicBrainz: {query}");
+                Logger.Log($"  Searching for cover art: {query}");
 
                 // Add rate limiting delay
                 int delayMs = GetConfigurationValue("MusicBrainz:RequestDelayMs", 1000);
@@ -725,114 +760,37 @@ namespace AudioFileMetadataProcessor
                 }
 
                 var response = await _httpClient.GetStringAsync(searchUrl);
-                
-                var searchResult = JsonSerializer.Deserialize<MusicBrainzSearchResponse>(
+
+                var searchResult = JsonSerializer.Deserialize<MusicBrainzReleaseSearchResponse>(
                     response,
                     _jsonSerializerOptions
                 );
 
-                if (searchResult?.Recordings != null)
+                if (searchResult?.Releases != null && searchResult.Releases.Length > 0)
                 {
-                    Logger.Log($"  Found {searchResult.Recordings.Length} recordings matching query");
-                    
-                    int maxResults = GetConfigurationValue("MusicBrainz:MaxResults", 3);
+                    // Try to find exact album match first, otherwise use first result
+                    var release = searchResult.Releases.FirstOrDefault(r =>
+                        string.Equals(r.Title, seeder.Album, StringComparison.OrdinalIgnoreCase))
+                        ?? searchResult.Releases[0];
 
-                    foreach (var recording in searchResult.Recordings.Take(maxResults))
+                    if (release?.Id != null)
                     {
-                        var artist = recording.ArtistCredit?.Select(ac => ac.Artist?.Name).FirstOrDefault() ?? "";
-
-                        var metadata = new TrackMetadata
-                        {
-                            Title = recording.Title,
-                            Artist = artist,
-                            Duration = recording.Length / 1000.0,
-                            Score = recording.Score / 100.0 // Convert to 0-1 range
-                        };
-
-                        if (recording.Releases == null || recording.Releases.Length == 0)
-                        {
-                            Logger.Log("  No releases found for this recording");
-                            continue;
-                        }
-
-                        // Get detailed release info
-                        if (recording.Releases?.Length > 0)
-                        {
-                            Logger.Log($"  Found {recording.Releases.Length} releases for \"{recording.Title}\"");
-
-                            // intialize release with seeder album if available
-                            var release = recording.Releases.FirstOrDefault(r => string.Equals(r.Title, seeder.Album, StringComparison.OrdinalIgnoreCase))
-                                   ?? recording.Releases.FirstOrDefault();
-
-                            // filtering for US releases with official status
-                            var officialUSReleases = recording.Releases.Where(r => r.Country == "US" && r.Status == "Official");
-
-                            if (officialUSReleases.Any())
-                            {
-                                // if we have an official US seeder-matching album/release, try to match it from MusicBrainz
-                                release = officialUSReleases?
-                                   .FirstOrDefault(r => string.Equals(r.Title, seeder.Album, StringComparison.OrdinalIgnoreCase))
-                                   ?? officialUSReleases?.FirstOrDefault();                               
-                            }
-                            else
-                            {
-                                Logger.Log("  No official US releases found for this recording, falling back to first release result.");                                
-                            }
-
-                            if (release != null)
-                            {
-                                metadata.Album = release.Title;
-                                metadata.ReleaseDate = release.Date;
-                                metadata.AlbumArtist = string.Join(", ", release.ArtistCredit?.Select(ac => ac.Artist?.Name) ?? []);
-
-                                // Get track number if available
-                                int? trackNumber = null;
-                                if (release.Media != null && release.Media.Length > 0)
-                                {
-                                    // Try to find the track that matches the seeder title
-                                    foreach (var media in release.Media)
-                                    {
-                                        if (media.Track != null)
-                                        {
-                                            var track = media.Track.FirstOrDefault(t =>
-                                                string.Equals(t.Title, seeder.Title, StringComparison.OrdinalIgnoreCase));
-                                            if (track != null && int.TryParse(track.Number, out int num))
-                                            {
-                                                trackNumber = num;
-                                                break;
-                                            }
-                                        }
-                                    }
-                                }
-                                metadata.TrackNumber = trackNumber ?? 0;
-                            }
-                            else
-                            {
-                                Logger.Log("  No matching release found for this recording");
-                                continue;
-                            }
-
-                            // Get cover art
-                            metadata.CoverArtUrl = await GetCoverArtUrl(release.Id);
-                        }
-
-                        results.Add(metadata);
-                        Logger.Log($"  Found: {metadata.Artist} - {metadata.Title} (Score: {metadata.Score:P1})");
+                        return await GetCoverArtUrl(release.Id);
                     }
                 }
 
-                return results;
+                return null;
             }
             catch (Exception ex)
             {
-                Logger.Log($"MusicBrainz search error: {ex.Message}");
-                return [];
+                Logger.Log($"Cover art search error: {ex.Message}");
+                return null;
             }
         }
 
         static async Task<string?> GetCoverArtUrl(string? releaseId)
         {
-            if (string.IsNullOrEmpty(releaseId))       
+            if (string.IsNullOrEmpty(releaseId))
             {
                 return null; // Return null if releaseId is null or empty
             }
@@ -872,6 +830,7 @@ namespace AudioFileMetadataProcessor
                     tags["Year"] = file.Tag.Year.ToString();
                     tags["Genre"] = string.Join(", ", file.Tag.Genres ?? new string[0]);
                     tags["Track"] = file.Tag.Track.ToString();
+                    tags["Disc"] = file.Tag.Disc.ToString();
                     tags["AlbumArtist"] = string.Join(", ", file.Tag.AlbumArtists ?? new string[0]);
                 }
             }
@@ -905,6 +864,12 @@ namespace AudioFileMetadataProcessor
                 Logger.Log($"  Year: {metadata.ReleaseDate}");
             if (metadata.TrackNumber > 0)
                 Logger.Log($"  Track: {metadata.TrackNumber}");
+            if (metadata.TrackCount > 0)
+                Logger.Log($"  Track Count: {metadata.TrackCount}");
+            if (metadata.DiscNumber > 0)
+                Logger.Log($"  Disc: {metadata.DiscNumber}");
+            if (metadata.DiscCount > 0)
+                Logger.Log($"  Disc Count: {metadata.DiscCount}");
             if (!string.IsNullOrEmpty(metadata.Genre))
                 Logger.Log($"  Genre: {metadata.Genre}");
             if (!string.IsNullOrEmpty(metadata.CoverArtUrl))
@@ -931,12 +896,21 @@ namespace AudioFileMetadataProcessor
 
                     if (!string.IsNullOrEmpty(metadata.ReleaseDate))
                     {
-                        if (DateTime.TryParse(metadata.ReleaseDate, out DateTime releaseDate))
-                            file.Tag.Year = (uint)releaseDate.Year;
+                        if (uint.TryParse(metadata.ReleaseDate, out uint year))
+                            file.Tag.Year = year;
                     }
 
                     if (metadata.TrackNumber > 0)
                         file.Tag.Track = (uint)metadata.TrackNumber;
+
+                    if (metadata.TrackCount > 0)
+                        file.Tag.TrackCount = (uint)metadata.TrackCount;
+
+                    if (metadata.DiscNumber > 0)
+                        file.Tag.Disc = (uint)metadata.DiscNumber;
+
+                    if (metadata.DiscCount > 0)
+                        file.Tag.DiscCount = (uint)metadata.DiscCount;
 
                     if (!string.IsNullOrEmpty(metadata.Genre))
                         file.Tag.Genres = metadata.Genre.Split(',').Select(g => g.Trim()).ToArray();
@@ -1014,6 +988,48 @@ namespace AudioFileMetadataProcessor
 
             return (T)Convert.ChangeType(section.Value, typeof(T));
         }
+
+        // Helper method to convert strings to proper case
+        static string ToProperCase(string? input)
+        {
+            if (string.IsNullOrEmpty(input))
+                return string.Empty;
+
+            return StringHelpers.ToTitleCaseWithExceptions(input.ToLower());
+        }
+
+        // Helper method to clean filename of special characters
+        static string CleanFilename(string filename)
+        {
+            if (string.IsNullOrEmpty(filename))
+                return string.Empty;
+
+            // Define invalid characters for filenames
+            char[] invalidChars = Path.GetInvalidFileNameChars();
+            string[] additionalInvalid = { ":", "*", "?", "\"", "<", ">", "|", "/", "\\" };
+
+            string cleaned = filename;
+
+            // Remove invalid filename characters
+            foreach (char c in invalidChars)
+            {
+                cleaned = cleaned.Replace(c, ' ');
+            }
+
+            // Remove additional problematic characters
+            foreach (string s in additionalInvalid)
+            {
+                cleaned = cleaned.Replace(s, " ");
+            }
+
+            // Clean up multiple spaces and trim
+            while (cleaned.Contains("  "))
+            {
+                cleaned = cleaned.Replace("  ", " ");
+            }
+
+            return cleaned.Trim();
+        }
     }
 
     // Configuration and data model classes
@@ -1024,9 +1040,6 @@ namespace AudioFileMetadataProcessor
         public string? Quality { get; set; }
         public string? OutputDirectory { get; set; }
         public bool PreserveOriginal { get; set; }
-        public string? SeederArtist { get; set; }
-        public string? SeederTitle { get; set; }
-        public string? SeederAlbum { get; set; }
         public string? SeedersFile { get; set; }
         public Dictionary<string, SeederData>? SeedersData { get; set; }
     }
@@ -1034,8 +1047,13 @@ namespace AudioFileMetadataProcessor
     public class SeederData
     {
         public string? Artist { get; set; }
+        public string? AlbumArtist { get; set; }
         public string? Title { get; set; }
         public string? Album { get; set; }
+        public string? Year { get; set; }
+        public string? TrackNumber { get; set; }
+        public string? DiscNumber { get; set; }
+        public string? Genre { get; set; }
         public string? FileName { get; set; }
     }
 
@@ -1049,12 +1067,20 @@ namespace AudioFileMetadataProcessor
         public string? ReleaseDate { get; set; }
         public double? Duration { get; set; }
         public int? TrackNumber { get; set; }
+        public int? TrackCount { get; set; }
+        public int? DiscNumber { get; set; }
+        public int? DiscCount { get; set; }
         public string? Genre { get; set; }
         public string? CoverArtUrl { get; set; }
         public double? Score { get; set; } // Search relevance score
     }
 
-    // MusicBrainz API response classes
+    // MusicBrainz API response classes for release search
+    public class MusicBrainzReleaseSearchResponse
+    {
+        public MusicBrainzRelease[]? Releases { get; set; }
+    }
+
     public class MusicBrainzSearchResponse
     {
         public MusicBrainzRecording[]? Recordings { get; set; }
