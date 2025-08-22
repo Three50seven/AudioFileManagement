@@ -10,16 +10,17 @@
 -  Audio Conversion - MP3 standardized to 44.1kHz stereo
 -  Batch Processing - Handles entire directories
 -  Git-Safe - Sensitive config in local files
+-  Keep Text Styling - Option to preserve text styling in the seeder metadata for a file, e.g. (AC/DC, R.E.M., etc.)
 
 ## CSV Seeders File Format:
 ```
-artist,albumartist,title,album,year,tracknumber,discnumber,genre,filename
+artist,albumartist,title,album,year,tracknumber,discnumber,genre,filename,keeptextstyling
 Bullet for my Valentine,Bullet for my Valentine,Pretty on the Outside,Fever,2010,11/11,1/1,metal,Track01
 Bullet for my Valentine,Bullet for my Valentine,Begging for mercy,Fever,2010,10/11,1/1,metal,Track02
 Bullet for my Valentine,Bullet for my Valentine,the last fight,fever,2010,3/11,1/1,metal,Track03
 Kings of Leon,Kings of Leon,back down south,Come Around Sundown,2010,7/16,1/1,alternative,Track04
 Kings of Leon,Kings of Leon,molly's chambers,Youth and Young Manhood,2003,8/12,1/1,alternative,Track05
-Kings of Leon,Kings of Leon,find me,WALLS,2016,4/10,1/1,alternative,Track06
+Kings of Leon,Kings of Leon,Find Me,WALLS,2016,4/10,1/1,alternative,Track06,true
 ```
 ## Usage Examples:
 Batch Processing with CSV:

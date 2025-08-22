@@ -239,7 +239,7 @@ namespace AudioFileMetadataProcessor
                     isFirstLine = false;
 
                     var parts = ParseCsvLine(trimmedLine);
-                    if (parts.Count >= 9) // Need all 9 columns: artist,albumartist,title,album,year,tracknumber,discnumber,genre,filename
+                    if (parts.Count >= 9) // Need at least 9 columns, KeepTextStyling is optional
                     {
                         var seeder = new SeederData
                         {
@@ -251,7 +251,8 @@ namespace AudioFileMetadataProcessor
                             TrackNumber = parts[5].Trim(),
                             DiscNumber = parts[6].Trim(),
                             Genre = parts[7].Trim(),
-                            FileName = parts[8].Trim()
+                            FileName = parts[8].Trim(),
+                            KeepTextStyling = parts.Count > 9 ? parts[9].Trim() : string.Empty // or whatever default value you want
                         };
 
                         // Use filename as key
@@ -487,7 +488,7 @@ namespace AudioFileMetadataProcessor
                 string trackNum = trackParts.Length > 0 ? trackParts[0].PadLeft(2, '0') : "00";
 
                 // Clean title for filename
-                string cleanTitle = Program.CleanFilename(Program.ToProperCase(seederData.Title));
+                string cleanTitle = CleanFilename(ToProperCase(seederData.Title));
                 return $"{trackNum} {cleanTitle}";
             }
             return Path.GetFileNameWithoutExtension(inputPath);
@@ -507,13 +508,13 @@ namespace AudioFileMetadataProcessor
             // Remove invalid filename characters
             foreach (char c in invalidChars)
             {
-                cleaned = cleaned.Replace(c, ' ');
+                cleaned = cleaned.Replace(c, '_');
             }
 
             // Remove additional problematic characters
             foreach (string s in additionalInvalid)
             {
-                cleaned = cleaned.Replace(s, " ");
+                cleaned = cleaned.Replace(s, "_");
             }
 
             // Clean up multiple spaces and trim
@@ -535,12 +536,17 @@ namespace AudioFileMetadataProcessor
 
         static TrackMetadata CreateMetadataFromSeeder(SeederData seeder)
         {
+            // When keepStyling is "true", Just taking what's in the seeder data for proper capitalization, acronyms, and other styles for titles (e.g. AC/DC, R.E.M., etc.), otherwise use propercase
+            var keepStyling = !string.IsNullOrEmpty(seeder.KeepTextStyling) &&
+                  bool.TryParse(seeder.KeepTextStyling.Trim().ToLower(), out bool keepStyleResult) &&
+                  keepStyleResult;
+
             var metadata = new TrackMetadata
             {
-                Title = ToProperCase(seeder.Title),
-                Artist = ToProperCase(seeder.Artist),
-                Album = ToProperCase(seeder.Album),
-                AlbumArtist = ToProperCase(seeder.AlbumArtist),
+                Title = keepStyling ? seeder.Title : ToProperCase(seeder.Title),
+                Artist = keepStyling ? seeder.Artist : ToProperCase(seeder.Artist),
+                Album = keepStyling ? seeder.Album : ToProperCase(seeder.Album),
+                AlbumArtist = keepStyling ? seeder.AlbumArtist : ToProperCase(seeder.AlbumArtist),
                 Genre = ToProperCase(seeder.Genre),
                 ReleaseDate = seeder.Year
             };

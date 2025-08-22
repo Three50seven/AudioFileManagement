@@ -11,5 +11,6 @@
         public string? DiscNumber { get; set; }
         public string? Genre { get; set; }
         public string? FileName { get; set; }
+        public string? KeepTextStyling { get; set; }
     }
 }
