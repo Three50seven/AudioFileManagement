@@ -13,3 +13,6 @@ ffmpeg -i "badfile.mp3" -map_metadata 0 -c copy "cleanfile.mp3"
 Some of the warnings you may encounter are:
 - Warning: Could not read metadata from SongTitle.mp3: Text delimiter expected. 
 - Warning: Could not read metadata from SongTitle2.mp3: Not enough bytes in field.
+
+## Tips
+Before updating your library, run the AudioFileMetadataProcessor app first to generate MP3 and metadata, then run this app (MP3FileManager) to update your library with the higher-quality files.
