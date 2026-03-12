@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Configuration;
 using AudioFileMetadataProcessor.Helpers;
 using AudioFileMetadataProcessor.Domain;
+using System.Text.Encodings.Web;
 
 namespace AudioFileMetadataProcessor
 {
@@ -239,7 +240,7 @@ namespace AudioFileMetadataProcessor
                     isFirstLine = false;
 
                     var parts = ParseCsvLine(trimmedLine);
-                    if (parts.Count >= 9) // Need at least 9 columns, KeepTextStyling is optional
+                    if (parts.Count >= 9) // Need at least 9 columns, KeepTextStyling and AlbumArtUrl are optional
                     {
                         var seeder = new SeederData
                         {
@@ -252,7 +253,8 @@ namespace AudioFileMetadataProcessor
                             DiscNumber = parts[6].Trim(),
                             Genre = parts[7].Trim(),
                             FileName = parts[8].Trim(),
-                            KeepTextStyling = parts.Count > 9 ? parts[9].Trim() : string.Empty // or whatever default value you want
+                            KeepTextStyling = parts.Count > 9 ? parts[9].Trim() : string.Empty, // or whatever default value you want
+                            AlbumArtUrl = parts.Count > 10 ? parts[10].Trim() : string.Empty
                         };
 
                         // Use filename as key
@@ -584,7 +586,14 @@ namespace AudioFileMetadataProcessor
         static async Task<string?> SearchForCoverArt(SeederData seeder)
         {
             try
-            {                
+            {
+                // Check if seeder has an AlbumArtUrl specified and use it if available
+                if (!string.IsNullOrEmpty(seeder.AlbumArtUrl))
+                {
+                    Logger.Log($"  Using album art URL from seeder data: {seeder.AlbumArtUrl}");
+                    return seeder.AlbumArtUrl;
+                }
+
                 // Check cache for cover art URL
                 if (!string.IsNullOrEmpty(CacheKey) && CoverArtUrlCache.TryGetValue(CacheKey, out var cachedUrl))
                 {

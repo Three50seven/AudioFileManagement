@@ -12,5 +12,6 @@
         public string? Genre { get; set; }
         public string? FileName { get; set; }
         public string? KeepTextStyling { get; set; }
+        public string? AlbumArtUrl { get; set; }
     }
 }
