@@ -40,3 +40,6 @@ AudioFileMetadataProcessor.exe "song.wav" -artist "The Beatles" -title "Yesterda
 # Tag with album info
 AudioFileMetadataProcessor.exe "track.mp3" -artist "Pink Floyd" -title "Money" -album "The Dark Side of the Moon"
 ```
+## Troubleshooting:
+-  Ensure CSV formatting is correct (no extra spaces, proper headers).
+-  Make sure you're not using the Controlled Folder Access protected folders (e.g. C:\Program Files, C:\Windows) for input or output, otherwise the app will fail silently. This Windows Defender feature blocks apps from writing to special folders like Music, Pictures, Documents, etc. — even if the NTFS permissions look fine. You can create files manually because Explorer itself is always whitelisted.
