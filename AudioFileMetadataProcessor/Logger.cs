@@ -2,30 +2,41 @@
 
 namespace AudioFileMetadataProcessor
 {
-    public static class Logger
+    public class Logger
     {
-        private static string? _logFilePath;
+        private static Logger? _instance;
         private static readonly object _lock = new();
+        private readonly string _resolvedLogPath;
 
-        public static void Initialize(string logDirectory)
+        private Logger(string logDirectory)
         {
-            if (!Directory.Exists(logDirectory))
-            {
-                Directory.CreateDirectory(logDirectory);
-            }
-            _logFilePath = Path.Combine(logDirectory, $"log_{DateTime.Now:yyyyMMdd}.txt");
+            var basePath = Path.Combine(logDirectory, "log_.log");
+            _resolvedLogPath = Path.Combine(logDirectory, $"log_{DateTime.Now:yyyyMMdd}.log");
 
             Serilog.Log.Logger = new LoggerConfiguration()
-            .MinimumLevel.Verbose()
-            .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
-            .WriteTo.File(_logFilePath, outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}", rollingInterval: RollingInterval.Day)
-            .CreateLogger();
+                .MinimumLevel.Verbose()
+                .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
+                .WriteTo.File(basePath,
+                    outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}",
+                    rollingInterval: RollingInterval.Day)
+                .CreateLogger();
+
+            Serilog.Log.Information("Logger initialized. Log file: {LogFilePath}", _resolvedLogPath);
         }
 
-        public static void Log(string message)
-        {            
-            Serilog.Log.Information(message);
+        public static Logger Initialize(string logDirectory)
+        {
+            lock (_lock)
+            {
+                _instance ??= new Logger(logDirectory);
+                return _instance;
+            }
         }
+
+        public static void Log(string message) =>
+            Serilog.Log.Information(message);
+
+        public string LogFilePath => _resolvedLogPath;
 
         public static void ShowUsage()
         {
