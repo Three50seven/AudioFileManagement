@@ -111,20 +111,22 @@ namespace AudioFileMetadataProcessor
                     }
 
                     // Convert to 16-bit for MP3 encoding
-                    var resampler = new WaveFormatConversionStream(
+                    using var resampler = new WaveFormatConversionStream(
                         new WaveFormat(reader.WaveFormat.SampleRate, 16, reader.WaveFormat.Channels),
                         reader);
 
                     if (bitRate.HasValue)
                     {
                         Logger.Log($"  Converting to MP3 using quality bitrate: {bitRate}kbps");
-                        using var writer = new LameMP3FileWriter(outputPath, resampler.WaveFormat, bitRate.Value, null);
+                        // Use the 3-argument constructor (path, waveFormat, bitRate)
+                        using var writer = new LameMP3FileWriter(outputPath, resampler.WaveFormat, bitRate.Value);
                         resampler.CopyTo(writer);
                     }
                     else
                     {
                         Logger.Log($"  Converting to MP3 using LAME Preset: {preset}");
-                        using var writer = new LameMP3FileWriter(outputPath, resampler.WaveFormat, preset, null);
+                        // Use the 3-argument constructor (path, waveFormat, preset)
+                        using var writer = new LameMP3FileWriter(outputPath, resampler.WaveFormat, preset);
                         resampler.CopyTo(writer);
                     }
 
