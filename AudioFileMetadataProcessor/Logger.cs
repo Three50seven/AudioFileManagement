@@ -1,4 +1,6 @@
-﻿namespace AudioFileMetadataProcessor
+﻿using Serilog;
+
+namespace AudioFileMetadataProcessor
 {
     public static class Logger
     {
@@ -12,19 +14,17 @@
                 Directory.CreateDirectory(logDirectory);
             }
             _logFilePath = Path.Combine(logDirectory, $"log_{DateTime.Now:yyyyMMdd}.txt");
+
+            Serilog.Log.Logger = new LoggerConfiguration()
+            .MinimumLevel.Verbose()
+            .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
+            .WriteTo.File(_logFilePath, outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}", rollingInterval: RollingInterval.Day)
+            .CreateLogger();
         }
 
         public static void Log(string message)
-        {
-            string logEntry = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}";
-            lock (_lock)
-            {
-                if (!string.IsNullOrEmpty(_logFilePath))
-                {
-                    File.AppendAllText(_logFilePath, logEntry + Environment.NewLine);
-                }
-            }
-            Console.WriteLine(message); // Optional: still show in console
+        {            
+            Serilog.Log.Information(message);
         }
 
         public static void ShowUsage()

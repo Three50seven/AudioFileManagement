@@ -1,5 +1,4 @@
-﻿using System.Text.Json;
-using AudioFileMetadataProcessor.Helpers;
+﻿using AudioFileMetadataProcessor.Helpers;
 using AudioFileMetadataProcessor.Domain;
 
 namespace AudioFileMetadataProcessor
@@ -11,9 +10,6 @@ namespace AudioFileMetadataProcessor
         private static Dictionary<string, byte[]> _coverArtCache = new();
         private static Dictionary<string, string> _coverArtUrlCache = new();
         internal static readonly string[] _stringArray = new[] { ".mp3", ".m4a", ".wav", ".wma", ".aac" };
-
-        // Reuse Json options from ConfigurationHelper where possible
-        private static readonly JsonSerializerOptions _jsonSerializerOptions = ConfigurationHelper.JsonOptions;
 
         public static Dictionary<string, byte[]> CoverArtCache { get => _coverArtCache; set => _coverArtCache = value; }
         public static Dictionary<string, string> CoverArtUrlCache { get => _coverArtUrlCache; set => _coverArtUrlCache = value; }

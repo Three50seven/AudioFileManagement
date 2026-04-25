@@ -2,18 +2,20 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Configuration" Version="9.0.15" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.FileExtensions" Version="9.0.15" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="9.0.15" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.7" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.FileExtensions" Version="10.0.7" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.7" />
     <PackageReference Include="NAudio" Version="2.3.0" />
     <PackageReference Include="NAudio.Lame" Version="2.1.0" />
-    <PackageReference Include="System.Drawing.Common" Version="9.0.15" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+    <PackageReference Include="System.Drawing.Common" Version="10.0.7" />
     <PackageReference Include="TagLibSharp" Version="2.3.0" />
   </ItemGroup>
 

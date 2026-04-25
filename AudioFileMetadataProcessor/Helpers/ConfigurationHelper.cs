@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
-using System.Net.Http.Headers;
 
 namespace AudioFileMetadataProcessor.Helpers
 {
@@ -47,9 +46,8 @@ namespace AudioFileMetadataProcessor.Helpers
                     // Clear default headers and set User-Agent header
                     _httpClient.DefaultRequestHeaders.Clear();
                     // Some HttpClient implementations require a ProductInfoHeaderValue
-                    _httpClient.DefaultRequestHeaders.UserAgent.Clear();
-                    _httpClient.DefaultRequestHeaders.UserAgent.Add(
-                        ProductInfoHeaderValue.Parse(userAgent));
+                    _httpClient.DefaultRequestHeaders.Clear();
+                    _httpClient.DefaultRequestHeaders.Add("User-Agent", userAgent);
                 }
 
                 return !string.IsNullOrEmpty(_musicBrainzBaseUrl);
