@@ -28,7 +28,8 @@ namespace AudioFileMetadataProcessor
 
                 // Initialize logger
                 string logPath = ConfigurationHelper.GetValue("AppSettings:LogPath", "Logs");
-                Logger.Initialize(logPath);
+                var logger = Logger.Initialize(logPath);
+                Console.WriteLine($"Logging to: {logger.LogFilePath}");
 
                 Logger.Log("Audio Metadata Tagger & Converter (NAudio Edition)");
                 Logger.Log("==================================================");
